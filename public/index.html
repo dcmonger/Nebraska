@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Realtime Card Table</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <h1>Card Table</h1>
+
+      <div id="loginPanel" class="panel">
+        <h2>Login</h2>
+        <input id="nameInput" maxlength="20" placeholder="Display name" />
+        <button id="loginBtn">Join game</button>
+        <p id="loginMessage"></p>
+      </div>
+
+      <div class="panel">
+        <h2>Players</h2>
+        <ul id="playerList"></ul>
+      </div>
+
+      <div class="panel">
+        <button id="drawBtn">Draw from deck</button>
+        <p>Double click top card to flip face up/down.</p>
+      </div>
+    </aside>
+
+    <main id="table" class="table"></main>
+
+    <dialog id="stackDialog">
+      <h3>Stack inspector</h3>
+      <ul id="stackContents"></ul>
+      <button id="closeDialogBtn">Close</button>
+    </dialog>
+
+    <script src="client.js"></script>
+  </body>
+</html>
