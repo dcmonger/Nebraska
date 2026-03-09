@@ -1,0 +1,97 @@
+:root {
+  color-scheme: dark;
+  font-family: Arial, sans-serif;
+}
+
+body {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  height: 100vh;
+  background: #0d3728;
+}
+
+.sidebar {
+  background: #0f1f18;
+  padding: 16px;
+  border-right: 1px solid #264637;
+}
+
+.panel {
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid #385e4c;
+  border-radius: 8px;
+}
+
+input,
+button {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid #4c7f68;
+}
+
+button {
+  background: #3a8f66;
+  color: white;
+  cursor: pointer;
+}
+
+.table {
+  position: relative;
+  overflow: hidden;
+  background: radial-gradient(circle at center, #26734f 0%, #145133 60%, #0f3b27 100%);
+}
+
+.stack {
+  position: absolute;
+  width: 78px;
+  height: 112px;
+  cursor: grab;
+  user-select: none;
+}
+
+.stack-count {
+  position: absolute;
+  right: -10px;
+  top: -10px;
+  background: #101010;
+  border: 1px solid #808080;
+  border-radius: 999px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+}
+
+.card {
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  border: 1px solid #111;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  font-weight: bold;
+  box-shadow: 0 4px 7px rgba(0, 0, 0, 0.35);
+}
+
+.card.faceup {
+  background: #f4f4f4;
+  color: black;
+}
+
+.card.facedown {
+  background: repeating-linear-gradient(45deg, #183a7e, #183a7e 8px, #2b5bb5 8px, #2b5bb5 16px);
+  color: #d8e7ff;
+}
+
+dialog {
+  border-radius: 8px;
+  border: 1px solid #385e4c;
+  background: #0e1f19;
+  color: white;
+}
