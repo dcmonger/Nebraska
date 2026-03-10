@@ -7,46 +7,10 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <aside class="sidebar">
-      <h1>Card Table</h1>
+    <div id="app"></div>
 
-      <div id="loginPanel" class="panel">
-        <h2>Login</h2>
-        <input id="nameInput" maxlength="20" placeholder="Display name" />
-        <button id="loginBtn">Join game</button>
-        <p id="loginMessage"></p>
-      </div>
-
-      <div class="panel">
-        <h2>Players</h2>
-        <ul id="playerList"></ul>
-      </div>
-
-      <div class="panel">
-        <p>Left click any stack to open actions.</p>
-        <p>Drag and release on a highlighted stack to combine.</p>
-      </div>
-    </aside>
-
-    <main id="table" class="table"></main>
-
-    <div id="cardMenu" class="card-menu hidden">
-      <h3 id="menuTitle">Stack actions</h3>
-      <div id="menuButtons" class="menu-buttons"></div>
-    </div>
-
-    <dialog id="cardModal">
-      <h3>Card Inspector</h3>
-      <div id="cardModalContent"></div>
-      <form method="dialog"><button>Close</button></form>
-    </dialog>
-
-    <dialog id="stackModal">
-      <h3>Stack Inspector</h3>
-      <div id="stackGrid" class="stack-grid"></div>
-      <form method="dialog"><button>Close</button></form>
-    </dialog>
-
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="client.js"></script>
   </body>
 </html>

@@ -5,6 +5,9 @@ const { URL } = require("url");
 
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 2;
+const TABLE_MIN = 20;
+const TABLE_MAX_X = 980;
+const TABLE_MAX_Y = 640;
 
 const SUITS = ["♠", "♥", "♦", "♣"];
 const RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
@@ -57,8 +60,8 @@ function drawTopCardToNewStack(sourceStack, playerId) {
   state.stacks[stackId] = {
     id: stackId,
     cardIds: [cardId],
-    x: clampTable(sourceStack.x + 120 + offset, 20, 980),
-    y: clampTable(sourceStack.y + 20 + offset, 20, 560),
+    x: clampTable(sourceStack.x + 120 + offset, TABLE_MIN, TABLE_MAX_X),
+    y: clampTable(sourceStack.y + 20 + offset, TABLE_MIN, TABLE_MAX_Y),
     ownerId: playerId,
   };
   if (sourceStack.cardIds.length === 0 && sourceStack.id !== "deck") {
@@ -221,8 +224,8 @@ const server = http.createServer(async (req, res) => {
     const stack = state.stacks[body?.stackId];
     if (!stack) return sendJson(res, 404, { error: "Stack not found" });
 
-    stack.x = clampTable(Number(body.x) || 0, 20, 980);
-    stack.y = clampTable(Number(body.y) || 0, 20, 560);
+    stack.x = clampTable(Number(body.x) || 0, TABLE_MIN, TABLE_MAX_X);
+    stack.y = clampTable(Number(body.y) || 0, TABLE_MIN, TABLE_MAX_Y);
     if (stack.id !== "deck") stack.ownerId = player.id;
     broadcast();
     return sendJson(res, 200, { ok: true });

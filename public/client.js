@@ -1,289 +1,404 @@
-const table = document.getElementById("table");
-const playerList = document.getElementById("playerList");
-const loginBtn = document.getElementById("loginBtn");
-const nameInput = document.getElementById("nameInput");
-const loginMessage = document.getElementById("loginMessage");
-const cardMenu = document.getElementById("cardMenu");
-const menuTitle = document.getElementById("menuTitle");
-const menuButtons = document.getElementById("menuButtons");
-const cardModal = document.getElementById("cardModal");
-const cardModalContent = document.getElementById("cardModalContent");
-const stackModal = document.getElementById("stackModal");
-const stackGrid = document.getElementById("stackGrid");
+const { useEffect, useMemo, useRef, useState } = React;
 
 const SNAP_DISTANCE = 90;
 const TABLE_MIN_X = 20;
 const TABLE_MAX_X = 980;
 const TABLE_MIN_Y = 20;
-const TABLE_MAX_Y = 560;
-
-let token = null;
-let me = null;
-let game = { players: [], state: { cards: {}, stacks: {} } };
-let dragging = null;
-let highlightedTargetId = null;
-
-const events = new EventSource("/events");
-events.onmessage = (event) => {
-  game = JSON.parse(event.data);
-  render();
-};
-
-async function api(path, body = null) {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { "x-session-token": token } : {}),
-    },
-    body: body ? JSON.stringify(body) : null,
-  });
-  return response.json();
-}
-
-loginBtn.addEventListener("click", async () => {
-  const result = await api("/api/login", { name: nameInput.value });
-  if (result.error) {
-    loginMessage.textContent = result.error;
-    return;
-  }
-  token = result.token;
-  me = result.player;
-  loginMessage.textContent = `Joined as ${me.name}`;
-});
-
-window.addEventListener("pointerdown", (event) => {
-  if (!cardMenu.contains(event.target)) {
-    cardMenu.classList.add("hidden");
-  }
-});
+const TABLE_MAX_Y = 640;
+const STACK_CARD_OFFSET = 4;
 
 function cardLabel(card) {
   return `${card.rank}${card.suit}`;
 }
 
-function seatForPlayer(playerId) {
-  if (me && playerId === me.id) return "bottom";
-  const idx = game.players.findIndex((player) => player.id === playerId);
-  return idx === -1 ? "bottom" : "top";
+function clampMenuPosition(clickX, clickY, menuEl) {
+  const margin = 10;
+  if (!menuEl) return { x: clickX, y: clickY };
+  const menuRect = menuEl.getBoundingClientRect();
+  const x = Math.max(margin, Math.min(clickX, window.innerWidth - menuRect.width - margin));
+  const y = clickY + menuRect.height + margin > window.innerHeight ? clickY - menuRect.height : clickY;
+  return { x, y: Math.max(margin, y) };
 }
 
-function isPlayerTwoPerspective() {
+function App() {
+  const [token, setToken] = useState(null);
+  const [me, setMe] = useState(null);
+  const [nameInput, setNameInput] = useState("");
+  const [loginMessage, setLoginMessage] = useState("");
+  const [game, setGame] = useState({ players: [], state: { cards: {}, stacks: {} } });
+  const [highlightedTargetId, setHighlightedTargetId] = useState(null);
+  const [menuState, setMenuState] = useState({ visible: false, x: 0, y: 0, stackId: null });
+  const [cardModalCard, setCardModalCard] = useState(null);
+  const [stackModalStackId, setStackModalStackId] = useState(null);
+
+  const tableRef = useRef(null);
+  const menuRef = useRef(null);
+  const draggingRef = useRef(null);
+  const gameRef = useRef(game);
+  const meRef = useRef(me);
+  const tokenRef = useRef(token);
+
+  useEffect(() => {
+    gameRef.current = game;
+  }, [game]);
+
+  useEffect(() => {
+    meRef.current = me;
+  }, [me]);
+
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
+
+  async function api(path, body = null) {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(tokenRef.current ? { "x-session-token": tokenRef.current } : {}),
+      },
+      body: body ? JSON.stringify(body) : null,
+    });
+    return response.json();
+  }
+
+  useEffect(() => {
+    const events = new EventSource("/events");
+    events.onmessage = (event) => {
+      setGame(JSON.parse(event.data));
+    };
+    return () => events.close();
+  }, []);
+
+  useEffect(() => {
+    function onPointerDown(event) {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setMenuState((current) => ({ ...current, visible: false }));
+      }
+    }
+
+    async function onPointerMove(event) {
+      const dragging = draggingRef.current;
+      const tableEl = tableRef.current;
+      if (!dragging || !tableEl) return;
+
+      const rect = tableEl.getBoundingClientRect();
+      const viewX = event.clientX - rect.left - dragging.offsetX;
+      const viewY = event.clientY - rect.top - dragging.offsetY;
+      const { x: newX, y: newY } = viewToWorld(viewX, viewY, gameRef.current, meRef.current);
+
+      if (Math.hypot(event.clientX - dragging.originX, event.clientY - dragging.originY) > 4) {
+        dragging.moved = true;
+      }
+
+      if (dragging.moved) {
+        await api("/api/move", {
+          stackId: dragging.stackId,
+          x: newX,
+          y: newY,
+        });
+        const targetId = getTargetStackId(dragging.stackId, newX, newY, gameRef.current);
+        setHighlightedTargetId(targetId);
+      }
+    }
+
+    async function onPointerUp(event) {
+      const dragging = draggingRef.current;
+      if (!dragging) return;
+
+      if (dragging.moved && highlightedTargetId) {
+        await api("/api/stack", {
+          sourceStackId: dragging.stackId,
+          targetStackId: highlightedTargetId,
+        });
+      } else if (!dragging.moved) {
+        const stack = gameRef.current.state.stacks[dragging.stackId];
+        if (stack && stack.cardIds.length > 0) {
+          setMenuState({
+            visible: true,
+            x: event.clientX,
+            y: event.clientY,
+            stackId: dragging.stackId,
+          });
+        }
+      }
+
+      draggingRef.current = null;
+      setHighlightedTargetId(null);
+    }
+
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [highlightedTargetId]);
+
+  useEffect(() => {
+    if (!menuState.visible || !menuRef.current) return;
+    const pos = clampMenuPosition(menuState.x, menuState.y, menuRef.current);
+    if (pos.x !== menuState.x || pos.y !== menuState.y) {
+      setMenuState((current) => ({ ...current, x: pos.x, y: pos.y }));
+    }
+  }, [menuState]);
+
+  async function handleLogin() {
+    const result = await api("/api/login", { name: nameInput });
+    if (result.error) {
+      setLoginMessage(result.error);
+      return;
+    }
+    setToken(result.token);
+    setMe(result.player);
+    setLoginMessage(`Joined as ${result.player.name}`);
+  }
+
+  function seatForPlayer(playerId) {
+    if (me && playerId === me.id) return "bottom";
+    const idx = game.players.findIndex((player) => player.id === playerId);
+    return idx === -1 ? "bottom" : "top";
+  }
+
+  function onStackPointerDown(event, stackId, viewedPosition) {
+    if (!me || event.button !== 0 || !tableRef.current) return;
+    event.preventDefault();
+    const rect = tableRef.current.getBoundingClientRect();
+    draggingRef.current = {
+      stackId,
+      originX: event.clientX,
+      originY: event.clientY,
+      moved: false,
+      offsetX: event.clientX - rect.left - viewedPosition.x,
+      offsetY: event.clientY - rect.top - viewedPosition.y,
+    };
+  }
+
+  async function handleMenuAction(action) {
+    const stackId = menuState.stackId;
+    const stack = game.state.stacks[stackId];
+    if (!stack) return;
+
+    if (action === "flip-top") {
+      await api("/api/flip", { stackId });
+    } else if (action === "draw") {
+      const result = await api("/api/draw", { stackId });
+      if (result.error) setLoginMessage(result.error);
+    } else if (action === "inspect-top") {
+      const topCardId = stack.cardIds[stack.cardIds.length - 1];
+      setCardModalCard(game.state.cards[topCardId]);
+    } else if (action === "flip-stack") {
+      await api("/api/flip", { stackId, scope: "stack" });
+    } else if (action === "view-stack") {
+      setStackModalStackId(stackId);
+    }
+
+    setMenuState((current) => ({ ...current, visible: false }));
+  }
+
+  const stackModalCards = useMemo(() => {
+    if (!stackModalStackId) return [];
+    const stack = game.state.stacks[stackModalStackId];
+    if (!stack) return [];
+    return [...stack.cardIds].reverse().map((cardId) => game.state.cards[cardId]);
+  }, [stackModalStackId, game]);
+
+  const perspectiveP2 = isPlayerTwoPerspective(game, me);
+
+  return React.createElement(
+    React.Fragment,
+    null,
+    React.createElement(
+      "aside",
+      { className: "sidebar" },
+      React.createElement("h1", null, "Card Table"),
+      React.createElement(
+        "div",
+        { className: "panel" },
+        React.createElement("h2", null, "Login"),
+        React.createElement("input", {
+          value: nameInput,
+          onChange: (event) => setNameInput(event.target.value),
+          maxLength: 20,
+          placeholder: "Display name",
+        }),
+        React.createElement("button", { onClick: handleLogin }, "Join game"),
+        React.createElement("p", null, loginMessage),
+      ),
+      React.createElement(
+        "div",
+        { className: "panel" },
+        React.createElement("h2", null, "Players"),
+        React.createElement(
+          "ul",
+          null,
+          game.players.map((player) =>
+            React.createElement(
+              "li",
+              { key: player.id },
+              me && me.id === player.id ? `${player.name} (you) - ${seatForPlayer(player.id)}` : `${player.name} - ${seatForPlayer(player.id)}`,
+            ),
+          ),
+        ),
+      ),
+      React.createElement(
+        "div",
+        { className: "panel" },
+        React.createElement("p", null, "Left click any stack to open actions."),
+        React.createElement("p", null, "Drag and release on a highlighted stack to combine."),
+      ),
+    ),
+    React.createElement(
+      "main",
+      {
+        ref: tableRef,
+        className: perspectiveP2 ? "table perspective-p2" : "table",
+      },
+      Object.values(game.state.stacks)
+        .filter((stack) => stack.cardIds.length > 0)
+        .map((stack) => {
+          const viewedPosition = worldToView(stack.x, stack.y, game, me);
+          const allCardsFaceDown = stack.cardIds.every((cardId) => !game.state.cards[cardId].faceUp);
+          const visibleCount = allCardsFaceDown ? 1 : Math.min(stack.cardIds.length, 6);
+          const cardsToRender = stack.cardIds.slice(stack.cardIds.length - visibleCount);
+
+          return React.createElement(
+            "div",
+            {
+              key: stack.id,
+              className: highlightedTargetId === stack.id ? "stack stack-highlight" : "stack",
+              style: { left: `${viewedPosition.x}px`, top: `${viewedPosition.y}px` },
+              onPointerDown: (event) => onStackPointerDown(event, stack.id, viewedPosition),
+            },
+            cardsToRender.map((cardId, index) => {
+              const card = game.state.cards[cardId];
+              return React.createElement(
+                "div",
+                {
+                  key: cardId,
+                  className: `card ${card.faceUp ? "faceup" : "facedown"}`,
+                  style: {
+                    transform: `translate(${index * STACK_CARD_OFFSET}px, ${index * STACK_CARD_OFFSET}px)`,
+                    zIndex: String(index),
+                  },
+                },
+                card.faceUp ? cardLabel(card) : "🂠",
+              );
+            }),
+            stack.cardIds.length > 1
+              ? React.createElement("div", { className: "stack-count" }, String(stack.cardIds.length))
+              : null,
+          );
+        }),
+    ),
+    menuState.visible
+      ? React.createElement(
+          "div",
+          {
+            ref: menuRef,
+            className: "card-menu",
+            style: { left: `${menuState.x}px`, top: `${menuState.y}px` },
+          },
+          React.createElement("h3", null, `Stack (${(game.state.stacks[menuState.stackId]?.cardIds.length || 0)} cards)`),
+          React.createElement(
+            "div",
+            { className: "menu-buttons" },
+            React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("flip-top") }, "Flip top card"),
+            React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("draw") }, "Draw top card from stack"),
+            React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("inspect-top") }, "Inspect top card"),
+            React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("flip-stack") }, "Flip entire stack"),
+            game.state.stacks[menuState.stackId] &&
+            !game.state.stacks[menuState.stackId].cardIds.every((cardId) => !game.state.cards[cardId].faceUp)
+              ? React.createElement(
+                  "button",
+                  { className: "menu-btn", onClick: () => handleMenuAction("view-stack") },
+                  "View each card in stack",
+                )
+              : null,
+          ),
+        )
+      : null,
+    cardModalCard
+      ? React.createElement(
+          "div",
+          { className: "overlay" },
+          React.createElement(
+            "dialog",
+            { open: true },
+            React.createElement("h3", null, "Card Inspector"),
+            React.createElement(
+              "div",
+              {
+                className: `card card-large ${cardModalCard.faceUp ? "faceup" : "facedown"}`,
+              },
+              cardModalCard.faceUp ? cardLabel(cardModalCard) : "🂠",
+            ),
+            React.createElement("button", { onClick: () => setCardModalCard(null) }, "Close"),
+          ),
+        )
+      : null,
+    stackModalStackId
+      ? React.createElement(
+          "div",
+          { className: "overlay" },
+          React.createElement(
+            "dialog",
+            { open: true },
+            React.createElement("h3", null, "Stack Inspector"),
+            React.createElement(
+              "div",
+              { className: "stack-grid" },
+              stackModalCards.map((card, idx) =>
+                React.createElement(
+                  "div",
+                  { key: `${card.id}-${idx}`, className: "grid-tile" },
+                  React.createElement(
+                    "div",
+                    { className: `card card-grid ${card.faceUp ? "faceup" : "facedown"}` },
+                    card.faceUp ? cardLabel(card) : "🂠",
+                  ),
+                  React.createElement("span", null, card.faceUp ? `${cardLabel(card)} (up)` : "Face down card"),
+                ),
+              ),
+            ),
+            React.createElement("button", { onClick: () => setStackModalStackId(null) }, "Close"),
+          ),
+        )
+      : null,
+  );
+}
+
+function isPlayerTwoPerspective(game, me) {
   if (!me) return false;
   return game.players.findIndex((player) => player.id === me.id) === 1;
 }
 
-function worldToView(x, y) {
-  if (!isPlayerTwoPerspective()) return { x, y };
+function worldToView(x, y, game, me) {
+  if (!isPlayerTwoPerspective(game, me)) return { x, y };
   return {
     x: TABLE_MIN_X + TABLE_MAX_X - x,
     y: TABLE_MIN_Y + TABLE_MAX_Y - y,
   };
 }
 
-function viewToWorld(x, y) {
-  if (!isPlayerTwoPerspective()) return { x, y };
+function viewToWorld(x, y, game, me) {
+  if (!isPlayerTwoPerspective(game, me)) return { x, y };
   return {
     x: TABLE_MIN_X + TABLE_MAX_X - x,
     y: TABLE_MIN_Y + TABLE_MAX_Y - y,
   };
 }
 
-function renderPlayers() {
-  playerList.innerHTML = "";
-  for (const player of game.players) {
-    const li = document.createElement("li");
-    const seat = seatForPlayer(player.id);
-    li.textContent = me && me.id === player.id ? `${player.name} (you) - ${seat}` : `${player.name} - ${seat}`;
-    playerList.appendChild(li);
-  }
-}
-
-function getTargetStackId(sourceStackId, x, y) {
+function getTargetStackId(sourceStackId, x, y, game) {
   for (const stack of Object.values(game.state.stacks)) {
     if (stack.id === sourceStackId) continue;
     const distance = Math.hypot(stack.x - x, stack.y - y);
-    if (distance < SNAP_DISTANCE) {
-      return stack.id;
-    }
+    if (distance < SNAP_DISTANCE) return stack.id;
   }
   return null;
 }
 
-function menuAction(label, onClick) {
-  const button = document.createElement("button");
-  button.className = "menu-btn";
-  button.textContent = label;
-  button.addEventListener("click", async () => {
-    await onClick();
-    cardMenu.classList.add("hidden");
-  });
-  menuButtons.appendChild(button);
-}
-
-function showTopCardModal(card) {
-  cardModalContent.innerHTML = "";
-  const preview = document.createElement("div");
-  preview.className = `card card-large ${card.faceUp ? "faceup" : "facedown"}`;
-  preview.textContent = card.faceUp ? cardLabel(card) : "🂠";
-  cardModalContent.appendChild(preview);
-  cardModal.showModal();
-}
-
-function showStackGridModal(stack) {
-  stackGrid.innerHTML = "";
-  [...stack.cardIds].reverse().forEach((cardId) => {
-    const card = game.state.cards[cardId];
-    const tile = document.createElement("div");
-    tile.className = "grid-tile";
-
-    const cardEl = document.createElement("div");
-    cardEl.className = `card card-grid ${card.faceUp ? "faceup" : "facedown"}`;
-    cardEl.textContent = card.faceUp ? cardLabel(card) : "🂠";
-
-    const caption = document.createElement("span");
-    caption.textContent = `${cardLabel(card)} ${card.faceUp ? "(up)" : "(down)"}`;
-
-    tile.appendChild(cardEl);
-    tile.appendChild(caption);
-    stackGrid.appendChild(tile);
-  });
-  stackModal.showModal();
-}
-
-function showStackMenu(event, stack, topCard) {
-  if (!me) return;
-  menuTitle.textContent = `Stack (${stack.cardIds.length} cards)`;
-  menuButtons.innerHTML = "";
-
-  menuAction("Turn top card face up", async () => {
-    await api("/api/flip", { stackId: stack.id, faceUp: true });
-  });
-  menuAction("Turn top card face down", async () => {
-    await api("/api/flip", { stackId: stack.id, faceUp: false });
-  });
-  menuAction("Draw top card from stack", async () => {
-    const result = await api("/api/draw", { stackId: stack.id });
-    if (result.error) loginMessage.textContent = result.error;
-  });
-  menuAction("Inspect top card", async () => {
-    showTopCardModal(topCard);
-  });
-  menuAction("Flip entire stack", async () => {
-    await api("/api/flip", { stackId: stack.id, scope: "stack" });
-  });
-  menuAction("View each card in stack", async () => {
-    showStackGridModal(stack);
-  });
-
-  cardMenu.style.left = `${event.clientX}px`;
-  cardMenu.style.top = `${event.clientY}px`;
-  cardMenu.classList.remove("hidden");
-}
-
-function renderTable() {
-  table.classList.toggle("perspective-p2", isPlayerTwoPerspective());
-  table.innerHTML = "";
-  for (const stack of Object.values(game.state.stacks)) {
-    if (stack.cardIds.length === 0) continue;
-
-    const stackEl = document.createElement("div");
-    stackEl.className = "stack";
-    if (highlightedTargetId === stack.id) {
-      stackEl.classList.add("stack-highlight");
-    }
-
-    const viewedPosition = worldToView(stack.x, stack.y);
-    stackEl.style.left = `${viewedPosition.x}px`;
-    stackEl.style.top = `${viewedPosition.y}px`;
-
-    const visibleCount = Math.min(stack.cardIds.length, 6);
-
-    for (let i = 0; i < visibleCount; i += 1) {
-      const cardId = stack.cardIds[stack.cardIds.length - visibleCount + i];
-      const card = game.state.cards[cardId];
-      const cardEl = document.createElement("div");
-      cardEl.className = `card ${card.faceUp ? "faceup" : "facedown"}`;
-      cardEl.textContent = card.faceUp ? cardLabel(card) : "🂠";
-      cardEl.style.transform = `translate(${i * 8}px, ${i * 8}px)`;
-      cardEl.style.zIndex = String(i);
-      stackEl.appendChild(cardEl);
-    }
-
-    if (stack.cardIds.length > 1) {
-      const count = document.createElement("div");
-      count.className = "stack-count";
-      count.textContent = String(stack.cardIds.length);
-      stackEl.appendChild(count);
-    }
-
-    stackEl.addEventListener("pointerdown", (event) => {
-      if (!me) return;
-      if (event.button !== 0) return;
-      event.preventDefault();
-      const rect = table.getBoundingClientRect();
-      dragging = {
-        stackId: stack.id,
-        originX: event.clientX,
-        originY: event.clientY,
-        moved: false,
-        offsetX: event.clientX - rect.left - viewedPosition.x,
-        offsetY: event.clientY - rect.top - viewedPosition.y,
-      };
-      stackEl.setPointerCapture(event.pointerId);
-    });
-
-    stackEl.addEventListener("pointerup", async (event) => {
-      if (!dragging || dragging.stackId !== stack.id) return;
-      if (dragging.moved) {
-        if (highlightedTargetId) {
-          await api("/api/stack", {
-            sourceStackId: dragging.stackId,
-            targetStackId: highlightedTargetId,
-          });
-        }
-      } else {
-        const topCard = game.state.cards[stack.cardIds[stack.cardIds.length - 1]];
-        showStackMenu(event, stack, topCard);
-      }
-      highlightedTargetId = null;
-      dragging = null;
-      render();
-    });
-
-    table.appendChild(stackEl);
-  }
-}
-
-window.addEventListener("pointermove", async (event) => {
-  if (!dragging) return;
-  const rect = table.getBoundingClientRect();
-  const viewX = event.clientX - rect.left - dragging.offsetX;
-  const viewY = event.clientY - rect.top - dragging.offsetY;
-  const { x: newX, y: newY } = viewToWorld(viewX, viewY);
-
-  if (Math.hypot(event.clientX - dragging.originX, event.clientY - dragging.originY) > 4) {
-    dragging.moved = true;
-  }
-
-  if (dragging.moved) {
-    await api("/api/move", {
-      stackId: dragging.stackId,
-      x: newX,
-      y: newY,
-    });
-    highlightedTargetId = getTargetStackId(dragging.stackId, newX, newY);
-    render();
-  }
-});
-
-window.addEventListener("pointerup", () => {
-  if (!dragging) return;
-  dragging = null;
-  highlightedTargetId = null;
-});
-
-function render() {
-  renderPlayers();
-  renderTable();
-}
+const root = ReactDOM.createRoot(document.getElementById("app"));
+root.render(React.createElement(App));

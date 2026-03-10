@@ -5,10 +5,13 @@
 
 body {
   margin: 0;
+  background: #0d3728;
+}
+
+#app {
   display: grid;
   grid-template-columns: 260px 1fr;
   height: 100vh;
-  background: #0d3728;
 }
 
 .sidebar {
@@ -146,10 +149,6 @@ button {
   width: 100%;
 }
 
-.hidden {
-  display: none;
-}
-
 .card-large {
   position: static;
   width: 170px;
@@ -188,4 +187,13 @@ dialog {
   border: 1px solid #385e4c;
   background: #0e1f19;
   color: white;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 1000;
 }
