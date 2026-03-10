@@ -85,9 +85,17 @@ button {
   user-select: none;
 }
 
-.stack-highlight {
-  outline: 3px solid #ffd447;
-  border-radius: 10px;
+.stack-highlight::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 78px;
+  height: 112px;
+  border: 3px solid #ffd447;
+  border-radius: 8px;
+  box-sizing: border-box;
+  pointer-events: none;
 }
 
 .stack-count {
@@ -148,6 +156,7 @@ button {
 .player-hand-zone {
   bottom: 28px;
   justify-content: center;
+  align-items: center;
 }
 
 .card-hand,
@@ -164,6 +173,30 @@ button {
 
 .hand-dragging {
   opacity: 0.5;
+}
+
+
+.hand-drop-line {
+  width: 6px;
+  height: 118px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.hand-drop-line.active {
+  background: #ffd447;
+  box-shadow: 0 0 10px rgba(255, 212, 71, 0.6);
+}
+
+.board-drop-outline {
+  position: absolute;
+  width: 78px;
+  height: 112px;
+  border: 3px solid #ffd447;
+  border-radius: 8px;
+  pointer-events: none;
+  box-sizing: border-box;
 }
 
 .card-menu {

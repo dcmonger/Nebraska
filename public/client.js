@@ -34,6 +34,8 @@ function App() {
   const [menuState, setMenuState] = useState({ visible: false, x: 0, y: 0, stackId: null });
   const [stackModalStackId, setStackModalStackId] = useState(null);
   const [draggedHandIndex, setDraggedHandIndex] = useState(null);
+  const [handDropIndex, setHandDropIndex] = useState(null);
+  const [boardDropPreview, setBoardDropPreview] = useState(null);
 
   const tableRef = useRef(null);
   const menuRef = useRef(null);
@@ -214,10 +216,58 @@ function App() {
   const opponentHandCount = opponent ? game.state.hands?.[opponent.id]?.count || 0 : 0;
 
   async function onHandDrop(targetIndex) {
-    if (draggedHandIndex === null || draggedHandIndex === targetIndex) return;
+    if (draggedHandIndex === null || targetIndex === null) return;
     const result = await api("/api/reorder-hand", { fromIndex: draggedHandIndex, toIndex: targetIndex });
     if (result.error) setLoginMessage(result.error);
     setDraggedHandIndex(null);
+    setHandDropIndex(null);
+  }
+
+  function getBoardDropPreview(event) {
+    if (!tableRef.current) return null;
+    const rect = tableRef.current.getBoundingClientRect();
+    const viewX = event.clientX - rect.left - 39;
+    const viewY = event.clientY - rect.top - 56;
+    const world = viewToWorld(viewX, viewY, gameRef.current, meRef.current);
+    const targetStackId = getTargetStackId(null, world.x, world.y, gameRef.current);
+
+    if (targetStackId) {
+      const targetStack = gameRef.current.state.stacks[targetStackId];
+      const viewedPosition = worldToView(targetStack.x, targetStack.y, gameRef.current, meRef.current);
+      return { x: viewedPosition.x, y: viewedPosition.y, targetStackId };
+    }
+
+    return {
+      x: Math.max(TABLE_MIN_X, Math.min(TABLE_MAX_X, viewX)),
+      y: Math.max(TABLE_MIN_Y, Math.min(TABLE_MAX_Y, viewY)),
+      targetStackId: null,
+    };
+  }
+
+  function onBoardDragOver(event) {
+    if (draggedHandIndex === null) return;
+    event.preventDefault();
+    setBoardDropPreview(getBoardDropPreview(event));
+  }
+
+  async function onBoardDrop(event) {
+    if (draggedHandIndex === null) return;
+    event.preventDefault();
+    const preview = getBoardDropPreview(event);
+    if (!preview) return;
+
+    const world = viewToWorld(preview.x, preview.y, gameRef.current, meRef.current);
+    const result = await api("/api/play-from-hand", {
+      handIndex: draggedHandIndex,
+      x: world.x,
+      y: world.y,
+      targetStackId: preview.targetStackId,
+    });
+    if (result.error) setLoginMessage(result.error);
+
+    setDraggedHandIndex(null);
+    setHandDropIndex(null);
+    setBoardDropPreview(null);
   }
 
   return React.createElement(
@@ -268,6 +318,9 @@ function App() {
       {
         ref: tableRef,
         className: perspectiveP2 ? "table perspective-p2" : "table",
+        onDragOver: onBoardDragOver,
+        onDrop: onBoardDrop,
+        onDragLeave: () => setBoardDropPreview(null),
       },
       React.createElement(
         "div",
@@ -280,19 +333,18 @@ function App() {
         .filter((stack) => stack.cardIds.length > 0)
         .map((stack) => {
           const viewedPosition = worldToView(stack.x, stack.y, game, me);
-          const allCardsFaceDown = stack.cardIds.every((cardId) => !game.state.cards[cardId].faceUp);
           const offset = stackOffsetPx(stack.cardIds.length);
-          const maxVisibleByHeight = Math.max(1, Math.floor(42 / Math.max(offset, 0.5)));
-          const visibleCount = allCardsFaceDown
-            ? Math.min(stack.cardIds.length, maxVisibleByHeight)
-            : Math.min(stack.cardIds.length, 10);
+          const visibleCount = Math.min(stack.cardIds.length, 10);
           const cardsToRender = stack.cardIds.slice(stack.cardIds.length - visibleCount);
 
           return React.createElement(
             "div",
             {
               key: stack.id,
-              className: highlightedTargetId === stack.id ? "stack stack-highlight" : "stack",
+              className:
+                highlightedTargetId === stack.id || (boardDropPreview && boardDropPreview.targetStackId === stack.id)
+                  ? "stack stack-highlight"
+                  : "stack",
               style: { left: `${viewedPosition.x}px`, top: `${viewedPosition.y}px` },
               onPointerDown: (event) => onStackPointerDown(event, stack.id, viewedPosition),
             },
@@ -322,20 +374,50 @@ function App() {
         myHandIds.map((cardId, idx) => {
           const card = game.state.cards[cardId];
           return React.createElement(
-            "div",
-            {
-              key: `${cardId}-${idx}`,
-              className: `card faceup card-hand ${draggedHandIndex === idx ? "hand-dragging" : ""}`,
-              draggable: true,
-              onDragStart: () => setDraggedHandIndex(idx),
-              onDragOver: (event) => event.preventDefault(),
+            React.Fragment,
+            { key: `${cardId}-${idx}` },
+            React.createElement("div", {
+              className: `hand-drop-line ${handDropIndex === idx ? "active" : ""}`,
+              onDragOver: (event) => {
+                event.preventDefault();
+                setHandDropIndex(idx);
+              },
               onDrop: () => onHandDrop(idx),
-              onDragEnd: () => setDraggedHandIndex(null),
-            },
-            cardLabel(card),
+            }),
+            React.createElement(
+              "div",
+              {
+                className: `card faceup card-hand ${draggedHandIndex === idx ? "hand-dragging" : ""}`,
+                draggable: true,
+                onDragStart: () => {
+                  setDraggedHandIndex(idx);
+                  setHandDropIndex(null);
+                },
+                onDragEnd: () => {
+                  setDraggedHandIndex(null);
+                  setHandDropIndex(null);
+                  setBoardDropPreview(null);
+                },
+              },
+              cardLabel(card),
+            ),
           );
         }),
+        React.createElement("div", {
+          className: `hand-drop-line ${handDropIndex === myHandIds.length ? "active" : ""}`,
+          onDragOver: (event) => {
+            event.preventDefault();
+            setHandDropIndex(myHandIds.length);
+          },
+          onDrop: () => onHandDrop(myHandIds.length),
+        }),
       ),
+      boardDropPreview
+        ? React.createElement("div", {
+            className: "board-drop-outline",
+            style: { left: `${boardDropPreview.x}px`, top: `${boardDropPreview.y}px` },
+          })
+        : null,
     ),
     menuState.visible
       ? React.createElement(
@@ -419,7 +501,7 @@ function viewToWorld(x, y, game, me) {
 
 function getTargetStackId(sourceStackId, x, y, game) {
   for (const stack of Object.values(game.state.stacks)) {
-    if (stack.id === sourceStackId) continue;
+    if (sourceStackId && stack.id === sourceStackId) continue;
     const distance = Math.hypot(stack.x - x, stack.y - y);
     if (distance < SNAP_DISTANCE) return stack.id;
   }

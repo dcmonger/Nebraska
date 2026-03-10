@@ -82,6 +82,31 @@ function drawTopCardToHand(sourceStack, playerId) {
   return cardId;
 }
 
+function playHandCardToBoard(playerId, handIndex, x, y, targetStackId = null) {
+  const hand = state.hands[playerId] || [];
+  if (!Number.isInteger(handIndex) || handIndex < 0 || handIndex >= hand.length) return null;
+
+  const [cardId] = hand.splice(handIndex, 1);
+  if (!cardId) return null;
+
+  const target = targetStackId ? state.stacks[targetStackId] : null;
+  if (target) {
+    target.cardIds.push(cardId);
+    target.ownerId = playerId;
+    return { stackId: target.id, cardId, merged: true };
+  }
+
+  const stackId = `stack-${state.nextStackId++}`;
+  state.stacks[stackId] = {
+    id: stackId,
+    cardIds: [cardId],
+    x: clampTable(Number(x) || 0, TABLE_MIN, TABLE_MAX_X),
+    y: clampTable(Number(y) || 0, TABLE_MIN, TABLE_MAX_Y),
+    ownerId: playerId,
+  };
+  return { stackId, cardId, merged: false };
+}
+
 function payloadForPlayer(playerId) {
   const hands = {};
   for (const player of sessions.values()) {
@@ -106,7 +131,6 @@ function mergeStacks(sourceId, targetId, playerId) {
   const source = state.stacks[sourceId];
   const target = state.stacks[targetId];
   if (!source || !target || source.id === target.id) return false;
-  if (source.id === "deck") return false;
   target.cardIds = target.cardIds.concat(source.cardIds);
   target.ownerId = playerId;
   delete state.stacks[source.id];
@@ -231,20 +255,33 @@ const server = http.createServer(async (req, res) => {
     const fromIndex = Number(body?.fromIndex);
     const toIndex = Number(body?.toIndex);
     const hand = state.hands[player.id] || [];
-    if (
-      !Number.isInteger(fromIndex) ||
-      !Number.isInteger(toIndex) ||
-      fromIndex < 0 ||
-      toIndex < 0 ||
-      fromIndex >= hand.length ||
-      toIndex >= hand.length
-    ) {
+    if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex) || fromIndex < 0 || fromIndex >= hand.length || toIndex < 0 || toIndex > hand.length) {
       return sendJson(res, 400, { error: "Invalid hand indices." });
     }
     const [moved] = hand.splice(fromIndex, 1);
-    hand.splice(toIndex, 0, moved);
+    const adjustedToIndex = toIndex > fromIndex ? toIndex - 1 : toIndex;
+    hand.splice(adjustedToIndex, 0, moved);
     broadcast();
     return sendJson(res, 200, { ok: true });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/play-from-hand") {
+    const player = getSession(req);
+    if (!player) return sendJson(res, 401, { error: "Login required." });
+
+    const body = await readBody(req).catch(() => null);
+    const played = playHandCardToBoard(
+      player.id,
+      Number(body?.handIndex),
+      body?.x,
+      body?.y,
+      body?.targetStackId || null,
+    );
+    if (!played) return sendJson(res, 400, { error: "Unable to play card from hand." });
+
+    state.cards[played.cardId].faceUp = true;
+    broadcast();
+    return sendJson(res, 200, { ok: true, ...played });
   }
 
   if (req.method === "POST" && url.pathname === "/api/flip") {
