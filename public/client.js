@@ -340,6 +340,7 @@ function App() {
     if (!me || event.button !== 0 || !tableRef.current) return;
     event.preventDefault();
     event.stopPropagation();
+    handleCardHoverEnd(hoverCandidateRef.current);
     const currentSelection = selectedStackIds.includes(stackId) ? selectedStackIds : [stackId];
     setSelectedStackIds(currentSelection);
     const anchors = {};
@@ -418,6 +419,8 @@ function App() {
   }
 
   function handleCardHoverStart(cardId) {
+    if (!cardId) return;
+    if (draggingRef.current || handDraggingRef.current || draggedHandIndex !== null || handDragPreview) return;
     if (Date.now() - recentDoubleClickRef.current < 350) return;
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
     hoverCandidateRef.current = cardId;
@@ -491,8 +494,10 @@ function App() {
   function normalizeHandDropIndex(targetIndex, sourceIndex = draggedHandIndex) {
     if (targetIndex === null) return null;
     if (sourceIndex === null) return targetIndex;
-    if (targetIndex === sourceIndex || targetIndex === sourceIndex + 1) return null;
-    return targetIndex;
+    const clamped = Math.max(0, Math.min(myHandIds.length, targetIndex));
+    if (clamped === sourceIndex) return null;
+    if (clamped > sourceIndex) return Math.min(myHandIds.length, clamped + 1);
+    return clamped;
   }
 
   async function onHandDrop(targetIndex, sourceIndex = draggedHandIndex) {
@@ -673,6 +678,8 @@ function App() {
           const offset = stackOffsetPx(stack.cardIds.length, visibleCount);
           const cardsToRender = stack.cardIds.slice(stack.cardIds.length - visibleCount);
           const topCardOffset = Math.max(0, (visibleCount - 1) * offset);
+          const topCardId = stack.cardIds[stack.cardIds.length - 1];
+          const topCard = game.state.cards[topCardId];
           const isStackHighlighted =
             selectedStackIds.includes(stack.id) || highlightedTargetId === stack.id || (boardDropPreview && boardDropPreview.targetStackId === stack.id);
 
@@ -680,12 +687,14 @@ function App() {
             "div",
             {
               key: stack.id,
-              className: isStackHighlighted ? "stack stack-highlight" : "stack",
+              className: isStackHighlighted ? `stack stack-highlight ${topCard?.tapped ? "stack-highlight-tapped" : ""}`.trim() : "stack",
               style: {
                 left: `${viewedPosition.x}px`,
                 top: `${viewedPosition.y}px`,
                 "--stack-top-offset": `${topCardOffset}px`,
               },
+              onMouseEnter: () => handleCardHoverStart(topCardId),
+              onMouseLeave: () => handleCardHoverEnd(topCardId),
               onPointerDown: (event) => onStackPointerDown(event, stack.id, viewedPosition),
               onDoubleClick: (event) => {
                 event.preventDefault();
@@ -706,7 +715,7 @@ function App() {
                 {
                   key: cardId,
                   className: `card ${card.faceUp ? "faceup" : "facedown"} ${card.faceUp && isRedSuit(card) ? "card-red" : ""} ${
-                    isStackHighlighted && index === cardsToRender.length - 1 ? "card-stack-highlight" : ""
+                    isStackHighlighted && index === cardsToRender.length - 1 && !card.tapped ? "card-stack-highlight" : ""
                   }`,
                   onMouseEnter: () => handleCardHoverStart(cardId),
                   onMouseLeave: () => handleCardHoverEnd(cardId),
@@ -756,6 +765,7 @@ function App() {
                   ? (event) => {
                       if (event.button !== 0) return;
                       event.preventDefault();
+                      handleCardHoverEnd(item.cardId);
                       const rect = event.currentTarget.getBoundingClientRect();
                       handDraggingRef.current = {
                         sourceIndex: item.originalIndex,

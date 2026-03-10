@@ -113,6 +113,12 @@ button {
   box-shadow: 0 0 14px rgba(255, 212, 71, 0.45);
 }
 
+.stack-highlight.stack-highlight-tapped::after {
+  box-shadow: none;
+  transform: rotate(90deg);
+  transform-origin: center;
+}
+
 .card-stack-highlight {
   outline: 3px solid #ffd447;
   outline-offset: -2px;
