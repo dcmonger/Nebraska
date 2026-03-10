@@ -127,7 +127,7 @@ function App() {
         });
 
         if (isPointerInHandZone(event.clientX, event.clientY)) {
-          setHandDropIndex(normalizeHandDropIndex(getHandInsertIndex(event.clientX), handDragging.sourceIndex));
+          setHandDropIndex(getHandInsertIndex(event.clientX));
           setBoardDropPreview(null);
           return;
         }
@@ -150,7 +150,7 @@ function App() {
         dragging.moved = true;
       }
 
-      if (dragging.moved) {
+        if (dragging.moved) {
         await api("/api/move", {
           stackId: dragging.stackId,
           x: newX,
@@ -159,7 +159,7 @@ function App() {
 
         if (shouldTreatAsHandDrop(event.clientY)) {
           setHandRaised(true);
-          setHandDropIndex(normalizeHandDropIndex(getHandInsertIndex(event.clientX)));
+          setHandDropIndex(getHandInsertIndex(event.clientX));
           setHighlightedTargetId(null);
           return;
         }
@@ -414,10 +414,13 @@ function App() {
 
     const draggedItem = items[draggedHandIndex];
     const remainingItems = items.filter((_, idx) => idx !== draggedHandIndex);
-    const previewIndex = handDropIndex === null ? null : normalizeHandDropIndex(handDropIndex);
-    if (previewIndex === null) return remainingItems;
+    if (handDropIndex === null) return remainingItems;
 
-    const insertionIndex = Math.max(0, Math.min(remainingItems.length, previewIndex > draggedHandIndex ? previewIndex - 1 : previewIndex));
+    const clampedPreviewIndex = Math.max(0, Math.min(items.length, handDropIndex));
+    const insertionIndex = Math.max(
+      0,
+      Math.min(remainingItems.length, clampedPreviewIndex > draggedHandIndex ? clampedPreviewIndex - 1 : clampedPreviewIndex),
+    );
     remainingItems.splice(insertionIndex, 0, {
       type: "ghost",
       cardId: draggedItem.cardId,
