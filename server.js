@@ -4,8 +4,11 @@ const path = require("path");
 const { URL } = require("url");
 
 const PORT = process.env.PORT || 3000;
-const MAX_PLAYERS = 2;
 const TABLE_MIN = 20;
+const SEAT_PLAYERS = [
+  { id: "player-1", name: "Player 1" },
+  { id: "player-2", name: "Player 2" },
+];
 
 const SUITS = ["♠", "♥", "♦", "♣"];
 const RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
@@ -31,6 +34,10 @@ function createDeckCards() {
 
 function createInitialState() {
   const deckCards = createDeckCards();
+  const hands = {};
+  SEAT_PLAYERS.forEach((player) => {
+    hands[player.id] = [];
+  });
   return {
     cards: Object.fromEntries(deckCards.map((card) => [card.id, card])),
     stacks: {
@@ -42,14 +49,14 @@ function createInitialState() {
         ownerId: null,
       },
     },
-    hands: {},
+    hands,
     log: [],
     nextStackId: 1,
   };
 }
 
 function addLog(playerId, action, details = "") {
-  const name = [...sessions.values()].find((player) => player.id === playerId)?.name || "Unknown";
+  const name = SEAT_PLAYERS.find((player) => player.id === playerId)?.name || "Unknown";
   const detailSuffix = details ? ` ${details}` : "";
   state.log.push(`${name} ${action}${detailSuffix}`);
   if (state.log.length > 80) {
@@ -138,7 +145,7 @@ function playHandCardToBoard(playerId, handIndex, x, y, targetStackId = null) {
 
 function payloadForPlayer(playerId) {
   const hands = {};
-  for (const player of sessions.values()) {
+  for (const player of SEAT_PLAYERS) {
     const cardIds = state.hands[player.id] || [];
     const isOwner = player.id === playerId;
     hands[player.id] = {
@@ -147,7 +154,7 @@ function payloadForPlayer(playerId) {
     };
   }
   return {
-    players: [...sessions.values()].map(({ id, name }) => ({ id, name })),
+    players: SEAT_PLAYERS,
     state: {
       cards: state.cards,
       stacks: state.stacks,
@@ -275,15 +282,14 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "POST" && url.pathname === "/api/login") {
     const body = await readBody(req).catch(() => null);
-    const name = `${body?.name || ""}`.trim().slice(0, 20);
-    if (!name) return sendJson(res, 400, { error: "Enter a display name." });
-    if (sessions.size >= MAX_PLAYERS) return sendJson(res, 403, { error: "Table is full." });
+    const requestedSeat = `${body?.seat || ""}`.trim();
+    const player = SEAT_PLAYERS.find((seat) => seat.id === requestedSeat);
+    if (!player) return sendJson(res, 400, { error: "Choose Player 1 or Player 2." });
 
     const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    sessions.set(token, { id: token, name });
-    state.hands[token] = [];
+    sessions.set(token, player);
     broadcast();
-    return sendJson(res, 200, { token, player: { id: token, name } });
+    return sendJson(res, 200, { token, player });
   }
 
   if (req.method === "POST" && url.pathname === "/api/draw") {
