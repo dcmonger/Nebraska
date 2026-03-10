@@ -170,6 +170,8 @@ button {
 
 .player-hand-zone {
   bottom: -36px;
+  left: 12.5%;
+  right: 12.5%;
   justify-content: center;
   align-items: center;
   transition: transform 180ms ease;
@@ -190,6 +192,11 @@ button {
 
 .card-hand {
   cursor: grab;
+  margin-left: var(--hand-spacing, 10px);
+}
+
+.player-hand-zone .card-hand:first-of-type {
+  margin-left: 0;
 }
 
 .hand-dragging {
@@ -198,7 +205,8 @@ button {
 
 
 .hand-drop-line {
-  width: 6px;
+  width: 8px;
+  flex: 0 0 8px;
   height: 118px;
   border-radius: 999px;
   background: transparent;

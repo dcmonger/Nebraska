@@ -92,6 +92,19 @@ function drawTopCardToHand(sourceStack, playerId) {
   return cardId;
 }
 
+function moveStackToHand(sourceStack, playerId) {
+  if (!sourceStack || sourceStack.cardIds.length === 0) return [];
+  if (!state.hands[playerId]) state.hands[playerId] = [];
+  const movedCardIds = [...sourceStack.cardIds];
+  state.hands[playerId].push(...movedCardIds);
+  if (sourceStack.id === "deck") {
+    sourceStack.cardIds = [];
+  } else {
+    delete state.stacks[sourceStack.id];
+  }
+  return movedCardIds;
+}
+
 function playHandCardToBoard(playerId, handIndex, x, y, targetStackId = null) {
   const hand = state.hands[playerId] || [];
   if (!Number.isInteger(handIndex) || handIndex < 0 || handIndex >= hand.length) return null;
@@ -270,12 +283,14 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 400, { error: "No cards to draw from this stack." });
     }
 
-    const cardId = drawTopCardToHand(sourceStack, player.id);
-    if (!cardId) return sendJson(res, 400, { error: "Unable to move card to hand." });
-    state.cards[cardId].faceUp = true;
-    addLog(player.id, "drew", `from ${sourceStack.id}`);
+    const movedCardIds = moveStackToHand(sourceStack, player.id);
+    if (movedCardIds.length === 0) return sendJson(res, 400, { error: "Unable to move cards to hand." });
+    for (const cardId of movedCardIds) {
+      state.cards[cardId].faceUp = true;
+    }
+    addLog(player.id, "drew", `${movedCardIds.length} cards from ${sourceStack.id}`);
     broadcast();
-    return sendJson(res, 200, { ok: true, cardId });
+    return sendJson(res, 200, { ok: true, cardIds: movedCardIds });
   }
 
   if (req.method === "POST" && url.pathname === "/api/reorder-hand") {

@@ -39,6 +39,8 @@ function App() {
   const [handDropIndex, setHandDropIndex] = useState(null);
   const [boardDropPreview, setBoardDropPreview] = useState(null);
   const [handRaised, setHandRaised] = useState(false);
+  const [handModalCardId, setHandModalCardId] = useState(null);
+  const [tableWidth, setTableWidth] = useState(typeof window === "undefined" ? 1200 : window.innerWidth);
 
   const tableRef = useRef(null);
   const handZoneRef = useRef(null);
@@ -59,6 +61,17 @@ function App() {
   useEffect(() => {
     tokenRef.current = token;
   }, [token]);
+
+  useEffect(() => {
+    if (!tableRef.current) return undefined;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      setTableWidth(entry.contentRect.width);
+    });
+    observer.observe(tableRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   async function api(path, body = null) {
     const response = await fetch(path, {
@@ -236,8 +249,18 @@ function App() {
   const opponent = me ? game.players.find((player) => player.id !== me.id) : null;
   const opponentHandCount = opponent ? game.state.hands?.[opponent.id]?.count || 0 : 0;
 
+  const handSpacingPx = useMemo(() => {
+    const count = myHandIds.length;
+    if (count <= 1) return 0;
+    const cardWidth = 90;
+    const handMaxWidth = Math.max(cardWidth, tableWidth * 0.75);
+    const spacing = (handMaxWidth - cardWidth) / (count - 1);
+    return Math.max(-44, Math.min(26, spacing));
+  }, [myHandIds.length, tableWidth]);
+
   function normalizeHandDropIndex(targetIndex, sourceIndex = draggedHandIndex) {
-    if (sourceIndex === null || targetIndex === null) return null;
+    if (targetIndex === null) return null;
+    if (sourceIndex === null) return targetIndex;
     if (targetIndex === sourceIndex || targetIndex === sourceIndex + 1) return null;
     return targetIndex;
   }
@@ -450,6 +473,7 @@ function App() {
         {
           ref: handZoneRef,
           className: `player-hand-zone ${handRaised || draggedHandIndex !== null ? "raised" : ""}`,
+          style: { "--hand-spacing": `${handSpacingPx}px` },
           onDragOver: (event) => {
             if (draggedHandIndex === null) return;
             event.preventDefault();
@@ -459,7 +483,8 @@ function App() {
           onDrop: async (event) => {
             if (draggedHandIndex === null) return;
             event.preventDefault();
-            await onHandDrop(getHandInsertIndex(event.clientX));
+            const targetIndex = handDropIndex ?? normalizeHandDropIndex(getHandInsertIndex(event.clientX));
+            await onHandDrop(targetIndex);
             setBoardDropPreview(null);
           },
         },
@@ -470,17 +495,14 @@ function App() {
             { key: `${cardId}-${idx}` },
             React.createElement("div", {
               className: `hand-drop-line ${handDropIndex === idx && normalizeHandDropIndex(idx) !== null ? "active" : ""}`,
-              onDragOver: (event) => {
-                event.preventDefault();
-                setHandDropIndex(normalizeHandDropIndex(idx));
-              },
-              onDrop: () => onHandDrop(idx),
             }),
             React.createElement(
               "div",
               {
                 className: `card faceup card-hand ${draggedHandIndex === idx ? "hand-dragging" : ""}`,
                 draggable: true,
+                style: { zIndex: String(idx + 1) },
+                onClick: () => setHandModalCardId(cardId),
                 onDragStart: () => {
                   setDraggedHandIndex(idx);
                   setHandRaised(true);
@@ -498,11 +520,6 @@ function App() {
         }),
         React.createElement("div", {
           className: `hand-drop-line ${handDropIndex === myHandIds.length && normalizeHandDropIndex(myHandIds.length) !== null ? "active" : ""}`,
-          onDragOver: (event) => {
-            event.preventDefault();
-            setHandDropIndex(normalizeHandDropIndex(myHandIds.length));
-          },
-          onDrop: () => onHandDrop(myHandIds.length),
         }),
       ),
       boardDropPreview
@@ -533,6 +550,25 @@ function App() {
               ? React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("shuffle") }, "Shuffle")
               : null,
             React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("inspect") }, "Inspect"),
+          ),
+        )
+      : null,
+    handModalCardId
+      ? React.createElement(
+          "div",
+          { className: "overlay", onClick: () => setHandModalCardId(null) },
+          React.createElement(
+            "dialog",
+            { open: true, onClick: (event) => event.stopPropagation() },
+            React.createElement("h3", null, "Card"),
+            React.createElement(
+              "div",
+              {
+                className: `card card-large ${game.state.cards[handModalCardId]?.faceUp ? "faceup" : "facedown"}`,
+              },
+              game.state.cards[handModalCardId]?.faceUp ? cardLabel(game.state.cards[handModalCardId]) : "🂠",
+            ),
+            React.createElement("button", { onClick: () => setHandModalCardId(null) }, "Close"),
           ),
         )
       : null,
