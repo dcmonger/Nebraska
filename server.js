@@ -292,6 +292,8 @@ const server = http.createServer(async (req, res) => {
     const stack = state.stacks[body?.stackId];
     if (!stack) return sendJson(res, 404, { error: "Stack not found" });
 
+    stack.cardIds.reverse();
+
     if (body?.scope === "stack") {
       for (const cardId of stack.cardIds) {
         const card = state.cards[cardId];
@@ -309,6 +311,24 @@ const server = http.createServer(async (req, res) => {
     } else {
       card.faceUp = !card.faceUp;
     }
+    broadcast();
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/shuffle") {
+    const player = getSession(req);
+    if (!player) return sendJson(res, 401, { error: "Login required." });
+
+    const body = await readBody(req).catch(() => null);
+    const stack = state.stacks[body?.stackId];
+    if (!stack) return sendJson(res, 404, { error: "Stack not found" });
+    if (stack.cardIds.length < 2) return sendJson(res, 400, { error: "Need at least two cards to shuffle." });
+
+    for (let i = stack.cardIds.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [stack.cardIds[i], stack.cardIds[j]] = [stack.cardIds[j], stack.cardIds[i]];
+    }
+
     broadcast();
     return sendJson(res, 200, { ok: true });
   }
