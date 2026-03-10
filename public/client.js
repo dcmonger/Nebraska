@@ -1,14 +1,12 @@
 const { useEffect, useMemo, useRef, useState } = React;
 
 const SNAP_DISTANCE = 90;
-const TABLE_MIN_X = 20;
-const TABLE_MAX_X = 980;
-const TABLE_MIN_Y = 20;
-const TABLE_MAX_Y = 900;
 const HAND_REVEAL_MARGIN = 170;
 const HAND_SNAP_MARGIN = 190;
 const BOARD_CARD_WIDTH = 78;
 const BOARD_CARD_HEIGHT = 112;
+const HOVER_PREVIEW_DELAY_MS = 500;
+const MENU_OPEN_DELAY_MS = 220;
 
 function cardLabel(card) {
   return `${card.rank}${card.suit}\uFE0E`;
@@ -47,6 +45,7 @@ function App() {
   const [handRaised, setHandRaised] = useState(false);
   const [hoverPreviewCardId, setHoverPreviewCardId] = useState(null);
   const [tableWidth, setTableWidth] = useState(typeof window === "undefined" ? 1200 : window.innerWidth);
+  const [tableHeight, setTableHeight] = useState(typeof window === "undefined" ? 900 : window.innerHeight);
   const [handDragPreview, setHandDragPreview] = useState(null);
   const [handInsertGhostCardId, setHandInsertGhostCardId] = useState(null);
   const [selectedStackIds, setSelectedStackIds] = useState([]);
@@ -63,6 +62,8 @@ function App() {
   const hoverTimerRef = useRef(null);
   const hoverCandidateRef = useRef(null);
   const selectionRef = useRef(null);
+  const menuOpenTimerRef = useRef(null);
+  const recentDoubleClickRef = useRef(0);
 
   useEffect(() => {
     gameRef.current = game;
@@ -78,6 +79,7 @@ function App() {
 
   useEffect(() => () => {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    if (menuOpenTimerRef.current) clearTimeout(menuOpenTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -86,6 +88,7 @@ function App() {
       const entry = entries[0];
       if (!entry) return;
       setTableWidth(entry.contentRect.width);
+      setTableHeight(entry.contentRect.height);
     });
     observer.observe(tableRef.current);
     return () => observer.disconnect();
@@ -116,6 +119,10 @@ function App() {
     function onPointerDown(event) {
       setHoverPreviewCardId(null);
       hoverCandidateRef.current = null;
+      if (menuOpenTimerRef.current) {
+        clearTimeout(menuOpenTimerRef.current);
+        menuOpenTimerRef.current = null;
+      }
       if (!event.target.closest(".stack")) {
         setSelectedStackIds([]);
       }
@@ -216,7 +223,7 @@ function App() {
 
         setHandDropIndex(null);
         setHandInsertGhostCardId(null);
-        const targetId = dragging.stackIds.length === 1 ? getTargetStackId(dragging.stackId, newX, newY, gameRef.current) : null;
+        const targetId = dragging.stackIds.length === 1 ? getTargetStackId(dragging.stackId, viewX, viewY, gameRef.current, meRef.current, worldToView) : null;
         setHighlightedTargetId(targetId);
       }
     }
@@ -274,12 +281,16 @@ function App() {
       } else if (!dragging.moved) {
         const stack = gameRef.current.state.stacks[dragging.stackId];
         if (stack && stack.cardIds.length > 0) {
-          setMenuState({
-            visible: true,
-            x: event.clientX,
-            y: event.clientY,
-            stackId: dragging.stackId,
-          });
+          if (menuOpenTimerRef.current) clearTimeout(menuOpenTimerRef.current);
+          menuOpenTimerRef.current = setTimeout(() => {
+            setMenuState({
+              visible: true,
+              x: event.clientX,
+              y: event.clientY,
+              stackId: dragging.stackId,
+            });
+            menuOpenTimerRef.current = null;
+          }, MENU_OPEN_DELAY_MS);
         }
       }
 
@@ -407,13 +418,14 @@ function App() {
   }
 
   function handleCardHoverStart(cardId) {
+    if (Date.now() - recentDoubleClickRef.current < 350) return;
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
     hoverCandidateRef.current = cardId;
     hoverTimerRef.current = setTimeout(() => {
       if (hoverCandidateRef.current === cardId) {
         setHoverPreviewCardId(cardId);
       }
-    }, 1000);
+    }, HOVER_PREVIEW_DELAY_MS);
   }
 
   function handleCardHoverEnd(cardId) {
@@ -423,6 +435,32 @@ function App() {
       hoverTimerRef.current = null;
     }
     setHoverPreviewCardId(null);
+  }
+
+  function getTableWorldBounds() {
+    const minX = tableWidth * 0.02;
+    const minY = tableHeight * 0.02;
+    const maxX = Math.max(minX, tableWidth * 0.98 - BOARD_CARD_WIDTH);
+    const maxY = Math.max(minY, tableHeight * 0.98 - BOARD_CARD_HEIGHT);
+    return { minX, minY, maxX, maxY };
+  }
+
+  function worldToView(x, y, currentGame = game, currentMe = me) {
+    if (!isPlayerTwoPerspective(currentGame, currentMe)) return { x, y };
+    const bounds = getTableWorldBounds();
+    return {
+      x: bounds.minX + bounds.maxX - x,
+      y: bounds.minY + bounds.maxY - y,
+    };
+  }
+
+  function viewToWorld(x, y, currentGame = game, currentMe = me) {
+    if (!isPlayerTwoPerspective(currentGame, currentMe)) return { x, y };
+    const bounds = getTableWorldBounds();
+    return {
+      x: bounds.minX + bounds.maxX - x,
+      y: bounds.minY + bounds.maxY - y,
+    };
   }
 
   const perspectiveP2 = isPlayerTwoPerspective(game, me);
@@ -479,8 +517,7 @@ function App() {
     const rect = tableRef.current.getBoundingClientRect();
     const viewX = event.clientX - rect.left - BOARD_CARD_WIDTH / 2;
     const viewY = event.clientY - rect.top - BOARD_CARD_HEIGHT / 2;
-    const world = viewToWorld(viewX, viewY, gameRef.current, meRef.current);
-    const targetStackId = getTargetStackId(null, world.x, world.y, gameRef.current);
+    const targetStackId = getTargetStackId(null, viewX, viewY, gameRef.current, meRef.current, worldToView);
 
     if (targetStackId) {
       const targetStack = gameRef.current.state.stacks[targetStackId];
@@ -488,9 +525,10 @@ function App() {
       return { x: viewedPosition.x, y: viewedPosition.y, targetStackId };
     }
 
+    const bounds = getTableWorldBounds();
     return {
-      x: Math.max(TABLE_MIN_X, Math.min(TABLE_MAX_X, viewX)),
-      y: Math.max(TABLE_MIN_Y, Math.min(TABLE_MAX_Y, viewY)),
+      x: Math.max(bounds.minX, Math.min(bounds.maxX, viewX)),
+      y: Math.max(bounds.minY, Math.min(bounds.maxY, viewY)),
       targetStackId: null,
     };
   }
@@ -651,6 +689,13 @@ function App() {
               onPointerDown: (event) => onStackPointerDown(event, stack.id, viewedPosition),
               onDoubleClick: (event) => {
                 event.preventDefault();
+                recentDoubleClickRef.current = Date.now();
+                if (menuOpenTimerRef.current) {
+                  clearTimeout(menuOpenTimerRef.current);
+                  menuOpenTimerRef.current = null;
+                }
+                setMenuState((current) => ({ ...current, visible: false }));
+                handleCardHoverEnd(stack.cardIds[stack.cardIds.length - 1]);
                 tapStack(stack.id);
               },
             },
@@ -667,6 +712,13 @@ function App() {
                   onMouseLeave: () => handleCardHoverEnd(cardId),
                   onDoubleClick: (event) => {
                     event.stopPropagation();
+                    recentDoubleClickRef.current = Date.now();
+                    if (menuOpenTimerRef.current) {
+                      clearTimeout(menuOpenTimerRef.current);
+                      menuOpenTimerRef.current = null;
+                    }
+                    setMenuState((current) => ({ ...current, visible: false }));
+                    handleCardHoverEnd(cardId);
                     tapCard(stack.id, cardId);
                   },
                   style: {
@@ -696,7 +748,7 @@ function App() {
             {
               key: `${item.type}-${item.cardId}-${idx}`,
               className: `card faceup card-hand ${isRedSuit(card) ? "card-red" : ""} ${item.type === "ghost" ? "card-hand-ghost" : ""}`,
-              style: { left: `${left}px`, zIndex: String(idx + 1), transform: card.tapped ? "rotate(90deg)" : undefined },
+              style: { left: `${left}px`, zIndex: String(idx + 1) },
               onMouseEnter: () => handleCardHoverStart(item.cardId),
               onMouseLeave: () => handleCardHoverEnd(item.cardId),
               onPointerDown:
@@ -750,7 +802,6 @@ function App() {
                 left: `${handDragPreview.x}px`,
                 top: `${handDragPreview.y}px`,
                 zIndex: "999",
-                transform: game.state.cards[handDragPreview.cardId]?.tapped ? "rotate(90deg)" : undefined,
               },
             },
             cardLabel(game.state.cards[handDragPreview.cardId]),
@@ -799,7 +850,6 @@ function App() {
               "div",
               {
                 className: `card card-large ${game.state.cards[hoverPreviewCardId]?.faceUp ? "faceup" : "facedown"} ${isRedSuit(game.state.cards[hoverPreviewCardId]) ? "card-red" : ""}`,
-                style: { transform: game.state.cards[hoverPreviewCardId]?.tapped ? "rotate(90deg)" : undefined },
               },
               game.state.cards[hoverPreviewCardId]?.faceUp ? cardLabel(game.state.cards[hoverPreviewCardId]) : "🂠",
             ),
@@ -814,26 +864,11 @@ function isPlayerTwoPerspective(game, me) {
   return game.players.findIndex((player) => player.id === me.id) === 1;
 }
 
-function worldToView(x, y, game, me) {
-  if (!isPlayerTwoPerspective(game, me)) return { x, y };
-  return {
-    x: TABLE_MIN_X + TABLE_MAX_X - x,
-    y: TABLE_MIN_Y + TABLE_MAX_Y - y,
-  };
-}
-
-function viewToWorld(x, y, game, me) {
-  if (!isPlayerTwoPerspective(game, me)) return { x, y };
-  return {
-    x: TABLE_MIN_X + TABLE_MAX_X - x,
-    y: TABLE_MIN_Y + TABLE_MAX_Y - y,
-  };
-}
-
-function getTargetStackId(sourceStackId, x, y, game) {
+function getTargetStackId(sourceStackId, viewX, viewY, game, me, worldToViewFn) {
   for (const stack of Object.values(game.state.stacks)) {
     if (sourceStackId && stack.id === sourceStackId) continue;
-    const distance = Math.hypot(stack.x - x, stack.y - y);
+    const viewed = worldToViewFn(stack.x, stack.y, game, me);
+    const distance = Math.hypot(viewed.x - viewX, viewed.y - viewY);
     if (distance < SNAP_DISTANCE) return stack.id;
   }
   return null;

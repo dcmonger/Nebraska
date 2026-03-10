@@ -6,8 +6,6 @@ const { URL } = require("url");
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 2;
 const TABLE_MIN = 20;
-const TABLE_MAX_X = 980;
-const TABLE_MAX_Y = 900;
 
 const SUITS = ["♠", "♥", "♦", "♣"];
 const RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
@@ -59,20 +57,22 @@ function addLog(playerId, action, details = "") {
   }
 }
 
-function clampTable(value, min, max) {
-  return Math.max(min, Math.min(max, value));
+function clampTable(value, min, max = null) {
+  if (typeof max === "number") return Math.max(min, Math.min(max, value));
+  return Math.max(min, value);
 }
 
 function drawTopCardToNewStack(sourceStack, playerId) {
   if (!sourceStack || sourceStack.cardIds.length === 0) return null;
   const cardId = sourceStack.cardIds.pop();
+  state.cards[cardId].tapped = false;
   const stackId = `stack-${state.nextStackId++}`;
   const offset = Math.floor(Math.random() * 25);
   state.stacks[stackId] = {
     id: stackId,
     cardIds: [cardId],
-    x: clampTable(sourceStack.x + 120 + offset, TABLE_MIN, TABLE_MAX_X),
-    y: clampTable(sourceStack.y + 20 + offset, TABLE_MIN, TABLE_MAX_Y),
+    x: clampTable(sourceStack.x + 120 + offset, TABLE_MIN),
+    y: clampTable(sourceStack.y + 20 + offset, TABLE_MIN),
     ownerId: playerId,
   };
   if (sourceStack.cardIds.length === 0 && sourceStack.id !== "deck") {
@@ -85,6 +85,7 @@ function drawTopCardToHand(sourceStack, playerId) {
   if (!sourceStack || sourceStack.cardIds.length === 0) return null;
   if (!state.hands[playerId]) state.hands[playerId] = [];
   const cardId = sourceStack.cardIds.pop();
+  state.cards[cardId].tapped = false;
   state.hands[playerId].push(cardId);
   if (sourceStack.cardIds.length === 0 && sourceStack.id !== "deck") {
     delete state.stacks[sourceStack.id];
@@ -99,6 +100,9 @@ function moveStackToHand(sourceStack, playerId, toIndex = null) {
   const hand = state.hands[playerId];
   const insertAt = Number.isInteger(toIndex) ? Math.max(0, Math.min(toIndex, hand.length)) : hand.length;
   hand.splice(insertAt, 0, ...movedCardIds);
+  for (const cardId of movedCardIds) {
+    state.cards[cardId].tapped = false;
+  }
   if (sourceStack.id === "deck") {
     sourceStack.cardIds = [];
   } else {
@@ -125,8 +129,8 @@ function playHandCardToBoard(playerId, handIndex, x, y, targetStackId = null) {
   state.stacks[stackId] = {
     id: stackId,
     cardIds: [cardId],
-    x: clampTable(Number(x) || 0, TABLE_MIN, TABLE_MAX_X),
-    y: clampTable(Number(y) || 0, TABLE_MIN, TABLE_MAX_Y),
+    x: clampTable(Number(x) || 0, TABLE_MIN),
+    y: clampTable(Number(y) || 0, TABLE_MIN),
     ownerId: playerId,
   };
   return { stackId, cardId, merged: false };
@@ -457,8 +461,8 @@ const server = http.createServer(async (req, res) => {
     const stack = state.stacks[body?.stackId];
     if (!stack) return sendJson(res, 404, { error: "Stack not found" });
 
-    stack.x = clampTable(Number(body.x) || 0, TABLE_MIN, TABLE_MAX_X);
-    stack.y = clampTable(Number(body.y) || 0, TABLE_MIN, TABLE_MAX_Y);
+    stack.x = clampTable(Number(body.x) || 0, TABLE_MIN);
+    stack.y = clampTable(Number(body.y) || 0, TABLE_MIN);
     if (stack.id !== "deck") stack.ownerId = player.id;
     broadcast();
     return sendJson(res, 200, { ok: true });
