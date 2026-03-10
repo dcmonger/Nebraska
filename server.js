@@ -44,6 +44,7 @@ function createInitialState() {
         ownerId: null,
       },
     },
+    hands: {},
     nextStackId: 1,
   };
 }
@@ -70,6 +71,37 @@ function drawTopCardToNewStack(sourceStack, playerId) {
   return stackId;
 }
 
+function drawTopCardToHand(sourceStack, playerId) {
+  if (!sourceStack || sourceStack.cardIds.length === 0) return null;
+  if (!state.hands[playerId]) state.hands[playerId] = [];
+  const cardId = sourceStack.cardIds.pop();
+  state.hands[playerId].push(cardId);
+  if (sourceStack.cardIds.length === 0 && sourceStack.id !== "deck") {
+    delete state.stacks[sourceStack.id];
+  }
+  return cardId;
+}
+
+function payloadForPlayer(playerId) {
+  const hands = {};
+  for (const player of sessions.values()) {
+    const cardIds = state.hands[player.id] || [];
+    const isOwner = player.id === playerId;
+    hands[player.id] = {
+      count: cardIds.length,
+      cardIds: isOwner ? cardIds : [],
+    };
+  }
+  return {
+    players: [...sessions.values()].map(({ id, name }) => ({ id, name })),
+    state: {
+      cards: state.cards,
+      stacks: state.stacks,
+      hands,
+    },
+  };
+}
+
 function mergeStacks(sourceId, targetId, playerId) {
   const source = state.stacks[sourceId];
   const target = state.stacks[targetId];
@@ -81,16 +113,9 @@ function mergeStacks(sourceId, targetId, playerId) {
   return true;
 }
 
-function currentPayload() {
-  return JSON.stringify({
-    players: [...sessions.values()].map(({ id, name }) => ({ id, name })),
-    state,
-  });
-}
-
 function broadcast() {
-  const message = `data: ${currentPayload()}\n\n`;
   for (const client of clients) {
+    const message = `data: ${JSON.stringify(payloadForPlayer(client.playerId))}\n\n`;
     client.write(message);
   }
 }
@@ -114,8 +139,8 @@ function sendJson(res, code, payload) {
   res.end(JSON.stringify(payload));
 }
 
-function getSession(req) {
-  const token = req.headers["x-session-token"];
+function getSession(req, explicitToken = null) {
+  const token = explicitToken || req.headers["x-session-token"];
   if (!token || typeof token !== "string") return null;
   return sessions.get(token) || null;
 }
@@ -146,13 +171,15 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && url.pathname === "/events") {
+    const player = getSession(req, url.searchParams.get("token"));
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
     });
+    res.playerId = player?.id || null;
     clients.add(res);
-    res.write(`data: ${currentPayload()}\n\n`);
+    res.write(`data: ${JSON.stringify(payloadForPlayer(res.playerId))}\n\n`);
     req.on("close", () => clients.delete(res));
     return;
   }
@@ -165,6 +192,7 @@ const server = http.createServer(async (req, res) => {
 
     const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     sessions.set(token, { id: token, name });
+    state.hands[token] = [];
     broadcast();
     return sendJson(res, 200, { token, player: { id: token, name } });
   }
@@ -179,12 +207,44 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 400, { error: "No cards to draw from this stack." });
     }
 
-    const newStackId = drawTopCardToNewStack(sourceStack, player.id);
-    if (!newStackId) return sendJson(res, 400, { error: "Unable to draw." });
+    const destination = body?.destination === "board" ? "board" : "hand";
+    if (destination === "board") {
+      const newStackId = drawTopCardToNewStack(sourceStack, player.id);
+      if (!newStackId) return sendJson(res, 400, { error: "Unable to draw." });
+      state.cards[state.stacks[newStackId].cardIds[0]].faceUp = true;
+      broadcast();
+      return sendJson(res, 200, { ok: true, stackId: newStackId });
+    }
 
-    state.cards[state.stacks[newStackId].cardIds[0]].faceUp = true;
+    const cardId = drawTopCardToHand(sourceStack, player.id);
+    if (!cardId) return sendJson(res, 400, { error: "Unable to draw." });
+    state.cards[cardId].faceUp = true;
     broadcast();
-    return sendJson(res, 200, { ok: true, stackId: newStackId });
+    return sendJson(res, 200, { ok: true, cardId });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/reorder-hand") {
+    const player = getSession(req);
+    if (!player) return sendJson(res, 401, { error: "Login required." });
+
+    const body = await readBody(req).catch(() => null);
+    const fromIndex = Number(body?.fromIndex);
+    const toIndex = Number(body?.toIndex);
+    const hand = state.hands[player.id] || [];
+    if (
+      !Number.isInteger(fromIndex) ||
+      !Number.isInteger(toIndex) ||
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= hand.length ||
+      toIndex >= hand.length
+    ) {
+      return sendJson(res, 400, { error: "Invalid hand indices." });
+    }
+    const [moved] = hand.splice(fromIndex, 1);
+    hand.splice(toIndex, 0, moved);
+    broadcast();
+    return sendJson(res, 200, { ok: true });
   }
 
   if (req.method === "POST" && url.pathname === "/api/flip") {

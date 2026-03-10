@@ -129,6 +129,43 @@ button {
   color: #d8e7ff;
 }
 
+.player-hand-zone,
+.opponent-hand-zone {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  gap: 10px;
+  padding: 8px;
+  min-height: 120px;
+}
+
+.opponent-hand-zone {
+  top: 28px;
+  justify-content: center;
+}
+
+.player-hand-zone {
+  bottom: 28px;
+  justify-content: center;
+}
+
+.card-hand,
+.card-hand-opponent {
+  position: relative;
+  width: 90px;
+  height: 130px;
+  font-size: 26px;
+}
+
+.card-hand {
+  cursor: grab;
+}
+
+.hand-dragging {
+  opacity: 0.5;
+}
+
 .card-menu {
   position: fixed;
   z-index: 999;
