@@ -66,6 +66,14 @@ button {
   bottom: 12px;
 }
 
+.table.perspective-p2::before {
+  content: "Player 1 side";
+}
+
+.table.perspective-p2::after {
+  content: "Player 2 side";
+}
+
 .stack {
   position: absolute;
   width: 98px;
