@@ -92,11 +92,13 @@ function drawTopCardToHand(sourceStack, playerId) {
   return cardId;
 }
 
-function moveStackToHand(sourceStack, playerId) {
+function moveStackToHand(sourceStack, playerId, toIndex = null) {
   if (!sourceStack || sourceStack.cardIds.length === 0) return [];
   if (!state.hands[playerId]) state.hands[playerId] = [];
   const movedCardIds = [...sourceStack.cardIds];
-  state.hands[playerId].push(...movedCardIds);
+  const hand = state.hands[playerId];
+  const insertAt = Number.isInteger(toIndex) ? Math.max(0, Math.min(toIndex, hand.length)) : hand.length;
+  hand.splice(insertAt, 0, ...movedCardIds);
   if (sourceStack.id === "deck") {
     sourceStack.cardIds = [];
   } else {
@@ -283,7 +285,13 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 400, { error: "No cards to draw from this stack." });
     }
 
-    const movedCardIds = moveStackToHand(sourceStack, player.id);
+    const requestedToIndex = Number(body?.toIndex);
+    const hand = state.hands[player.id] || [];
+    if (body?.toIndex !== undefined && (!Number.isInteger(requestedToIndex) || requestedToIndex < 0 || requestedToIndex > hand.length)) {
+      return sendJson(res, 400, { error: "Invalid hand index." });
+    }
+
+    const movedCardIds = moveStackToHand(sourceStack, player.id, body?.toIndex === undefined ? null : requestedToIndex);
     if (movedCardIds.length === 0) return sendJson(res, 400, { error: "Unable to move cards to hand." });
     for (const cardId of movedCardIds) {
       state.cards[cardId].faceUp = true;
