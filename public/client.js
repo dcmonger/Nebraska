@@ -49,6 +49,8 @@ function App() {
   const [tableWidth, setTableWidth] = useState(typeof window === "undefined" ? 1200 : window.innerWidth);
   const [handDragPreview, setHandDragPreview] = useState(null);
   const [handInsertGhostCardId, setHandInsertGhostCardId] = useState(null);
+  const [selectedStackIds, setSelectedStackIds] = useState([]);
+  const [selectionBox, setSelectionBox] = useState(null);
 
   const tableRef = useRef(null);
   const handZoneRef = useRef(null);
@@ -59,6 +61,8 @@ function App() {
   const meRef = useRef(me);
   const tokenRef = useRef(token);
   const hoverTimerRef = useRef(null);
+  const hoverCandidateRef = useRef(null);
+  const selectionRef = useRef(null);
 
   useEffect(() => {
     gameRef.current = game;
@@ -110,6 +114,11 @@ function App() {
 
   useEffect(() => {
     function onPointerDown(event) {
+      setHoverPreviewCardId(null);
+      hoverCandidateRef.current = null;
+      if (!event.target.closest(".stack")) {
+        setSelectedStackIds([]);
+      }
       if (menuRef.current && !menuRef.current.contains(event.target)) {
         setMenuState((current) => ({ ...current, visible: false }));
       }
@@ -128,8 +137,8 @@ function App() {
 
         setHandDragPreview({
           cardId: handDragging.cardId,
-          x: event.clientX - BOARD_CARD_WIDTH / 2,
-          y: event.clientY - BOARD_CARD_HEIGHT / 2,
+          x: event.clientX - handDragging.offsetX,
+          y: event.clientY - handDragging.offsetY,
         });
 
         if (isPointerInHandZone(event.clientX, event.clientY)) {
@@ -145,7 +154,31 @@ function App() {
 
       const dragging = draggingRef.current;
       const tableEl = tableRef.current;
-      if (!dragging || !tableEl) return;
+      if (!dragging || !tableEl) {
+        const selection = selectionRef.current;
+        if (selection && selection.active) {
+          if (!tableEl) return;
+          const currentRect = makeRect(selection.originX, selection.originY, event.clientX, event.clientY);
+          const tableRect = tableEl.getBoundingClientRect();
+          const selectedIds = Object.values(gameRef.current.state.stacks)
+            .filter((stack) => stack.cardIds.length > 0)
+            .filter((stack) => {
+              const viewed = worldToView(stack.x, stack.y, gameRef.current, meRef.current);
+              const stackRect = {
+                left: tableRect.left + viewed.x,
+                top: tableRect.top + viewed.y,
+                right: tableRect.left + viewed.x + 98,
+                bottom: tableRect.top + viewed.y + 146,
+              };
+              return rectsIntersect(currentRect, stackRect);
+            })
+            .map((stack) => stack.id);
+
+          setSelectionBox(viewportToTableRect(currentRect, tableRect));
+          setSelectedStackIds(selectedIds);
+        }
+        return;
+      }
 
       const rect = tableEl.getBoundingClientRect();
       const viewX = event.clientX - rect.left - dragging.offsetX;
@@ -157,11 +190,19 @@ function App() {
       }
 
         if (dragging.moved) {
-        await api("/api/move", {
-          stackId: dragging.stackId,
-          x: newX,
-          y: newY,
-        });
+        const deltaX = newX - dragging.startX;
+        const deltaY = newY - dragging.startY;
+        await Promise.all(
+          dragging.stackIds.map((stackId) => {
+            const anchor = dragging.anchors[stackId];
+            if (!anchor) return Promise.resolve();
+            return api("/api/move", {
+              stackId,
+              x: anchor.x + deltaX,
+              y: anchor.y + deltaY,
+            });
+          }),
+        );
 
         if (shouldTreatAsHandDrop(event.clientY)) {
           const draggingStack = gameRef.current.state.stacks[dragging.stackId];
@@ -175,7 +216,7 @@ function App() {
 
         setHandDropIndex(null);
         setHandInsertGhostCardId(null);
-        const targetId = getTargetStackId(dragging.stackId, newX, newY, gameRef.current);
+        const targetId = dragging.stackIds.length === 1 ? getTargetStackId(dragging.stackId, newX, newY, gameRef.current) : null;
         setHighlightedTargetId(targetId);
       }
     }
@@ -210,16 +251,22 @@ function App() {
       }
 
       const dragging = draggingRef.current;
+      const selection = selectionRef.current;
+      if (selection && selection.active) {
+        selectionRef.current = null;
+        setSelectionBox(null);
+        return;
+      }
       if (!dragging) return;
 
-      if (dragging.moved && shouldTreatAsHandDrop(event.clientY)) {
+      if (dragging.moved && dragging.stackIds.length === 1 && shouldTreatAsHandDrop(event.clientY)) {
         const targetIndex = normalizeHandDropIndex(getHandInsertIndex(event.clientX), null);
         const result = await api("/api/pickup-to-hand", {
           stackId: dragging.stackId,
           toIndex: targetIndex === null ? undefined : targetIndex,
         });
         if (result.error) setLoginMessage(result.error);
-      } else if (dragging.moved && highlightedTargetId) {
+      } else if (dragging.moved && dragging.stackIds.length === 1 && highlightedTargetId) {
         await api("/api/stack", {
           sourceStackId: dragging.stackId,
           targetStackId: highlightedTargetId,
@@ -281,15 +328,57 @@ function App() {
   function onStackPointerDown(event, stackId, viewedPosition) {
     if (!me || event.button !== 0 || !tableRef.current) return;
     event.preventDefault();
+    event.stopPropagation();
+    const currentSelection = selectedStackIds.includes(stackId) ? selectedStackIds : [stackId];
+    setSelectedStackIds(currentSelection);
+    const anchors = {};
+    currentSelection.forEach((id) => {
+      const stack = gameRef.current.state.stacks[id];
+      if (stack) anchors[id] = { x: stack.x, y: stack.y };
+    });
+    const currentStack = gameRef.current.state.stacks[stackId];
+    if (!currentStack) return;
     const rect = tableRef.current.getBoundingClientRect();
     draggingRef.current = {
       stackId,
+      stackIds: currentSelection,
+      anchors,
+      startX: currentStack.x,
+      startY: currentStack.y,
       originX: event.clientX,
       originY: event.clientY,
       moved: false,
       offsetX: event.clientX - rect.left - viewedPosition.x,
       offsetY: event.clientY - rect.top - viewedPosition.y,
     };
+  }
+
+  function onTablePointerDown(event) {
+    if (!tableRef.current || event.button !== 0) return;
+    const interactiveAncestor = event.target.closest(".stack, .card-menu, .player-hand-zone, .opponent-hand-zone");
+    if (interactiveAncestor) return;
+
+    setSelectedStackIds([]);
+    setMenuState((current) => ({ ...current, visible: false }));
+    setHighlightedTargetId(null);
+
+    selectionRef.current = {
+      active: true,
+      originX: event.clientX,
+      originY: event.clientY,
+    };
+    const tableRect = tableRef.current.getBoundingClientRect();
+    setSelectionBox(
+      viewportToTableRect(
+        {
+          left: event.clientX,
+          top: event.clientY,
+          right: event.clientX,
+          bottom: event.clientY,
+        },
+        tableRect,
+      ),
+    );
   }
 
   async function handleMenuAction(action) {
@@ -319,17 +408,21 @@ function App() {
 
   function handleCardHoverStart(cardId) {
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverCandidateRef.current = cardId;
     hoverTimerRef.current = setTimeout(() => {
-      setHoverPreviewCardId(cardId);
-    }, 1500);
+      if (hoverCandidateRef.current === cardId) {
+        setHoverPreviewCardId(cardId);
+      }
+    }, 1000);
   }
 
   function handleCardHoverEnd(cardId) {
+    if (hoverCandidateRef.current === cardId) hoverCandidateRef.current = null;
     if (hoverTimerRef.current) {
       clearTimeout(hoverTimerRef.current);
       hoverTimerRef.current = null;
     }
-    setHoverPreviewCardId((current) => (current === cardId ? null : current));
+    setHoverPreviewCardId(null);
   }
 
   const perspectiveP2 = isPlayerTwoPerspective(game, me);
@@ -516,12 +609,16 @@ function App() {
       {
         ref: tableRef,
         className: perspectiveP2 ? "table perspective-p2" : "table",
+        onPointerDown: onTablePointerDown,
         onPointerMove: (event) => {
           if (!tableRef.current) return;
           const rect = tableRef.current.getBoundingClientRect();
           setHandRaised(event.clientY >= rect.bottom - HAND_REVEAL_MARGIN);
         },
-        onPointerLeave: () => setHandRaised(false),
+        onPointerLeave: () => {
+          setHandRaised(false);
+          handleCardHoverEnd(hoverCandidateRef.current);
+        },
       },
       React.createElement(
         "div",
@@ -539,7 +636,7 @@ function App() {
           const cardsToRender = stack.cardIds.slice(stack.cardIds.length - visibleCount);
           const topCardOffset = Math.max(0, (visibleCount - 1) * offset);
           const isStackHighlighted =
-            highlightedTargetId === stack.id || (boardDropPreview && boardDropPreview.targetStackId === stack.id);
+            selectedStackIds.includes(stack.id) || highlightedTargetId === stack.id || (boardDropPreview && boardDropPreview.targetStackId === stack.id);
 
           return React.createElement(
             "div",
@@ -630,6 +727,17 @@ function App() {
         ? React.createElement("div", {
             className: "board-drop-outline",
             style: { left: `${boardDropPreview.x}px`, top: `${boardDropPreview.y}px` },
+          })
+        : null,
+      selectionBox
+        ? React.createElement("div", {
+            className: "selection-box",
+            style: {
+              left: `${selectionBox.left}px`,
+              top: `${selectionBox.top}px`,
+              width: `${Math.max(0, selectionBox.right - selectionBox.left)}px`,
+              height: `${Math.max(0, selectionBox.bottom - selectionBox.top)}px`,
+            },
           })
         : null,
 
@@ -729,6 +837,29 @@ function getTargetStackId(sourceStackId, x, y, game) {
     if (distance < SNAP_DISTANCE) return stack.id;
   }
   return null;
+}
+
+function viewportToTableRect(rect, tableRect) {
+  if (!tableRect) return null;
+  return {
+    left: rect.left - tableRect.left,
+    top: rect.top - tableRect.top,
+    right: rect.right - tableRect.left,
+    bottom: rect.bottom - tableRect.top,
+  };
+}
+
+function makeRect(ax, ay, bx, by) {
+  return {
+    left: Math.min(ax, bx),
+    top: Math.min(ay, by),
+    right: Math.max(ax, bx),
+    bottom: Math.max(ay, by),
+  };
+}
+
+function rectsIntersect(a, b) {
+  return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
 }
 
 const root = ReactDOM.createRoot(document.getElementById("app"));
