@@ -289,13 +289,33 @@ function App() {
     if (validTargetIndex === null) {
       setDraggedHandIndex(null);
       setHandDropIndex(null);
+      setHandRaised(false);
       return;
     }
     const result = await api("/api/reorder-hand", { fromIndex: draggedHandIndex, toIndex: validTargetIndex });
     if (result.error) setLoginMessage(result.error);
     setDraggedHandIndex(null);
     setHandDropIndex(null);
+    setHandRaised(false);
   }
+
+  useEffect(() => {
+    if (draggedHandIndex === null) return undefined;
+
+    function clearDragState() {
+      setDraggedHandIndex(null);
+      setHandDropIndex(null);
+      setBoardDropPreview(null);
+      setHandRaised(false);
+    }
+
+    window.addEventListener("dragend", clearDragState);
+    window.addEventListener("drop", clearDragState);
+    return () => {
+      window.removeEventListener("dragend", clearDragState);
+      window.removeEventListener("drop", clearDragState);
+    };
+  }, [draggedHandIndex]);
 
   function getBoardDropPreview(event) {
     if (!tableRef.current) return null;
@@ -375,7 +395,13 @@ function App() {
       return;
     }
     const preview = getBoardDropPreview(event);
-    if (!preview) return;
+    if (!preview) {
+      setDraggedHandIndex(null);
+      setHandDropIndex(null);
+      setBoardDropPreview(null);
+      setHandRaised(false);
+      return;
+    }
 
     const world = viewToWorld(preview.x, preview.y, gameRef.current, meRef.current);
     const result = await api("/api/play-from-hand", {
@@ -389,6 +415,7 @@ function App() {
     setDraggedHandIndex(null);
     setHandDropIndex(null);
     setBoardDropPreview(null);
+    setHandRaised(false);
   }
 
   return React.createElement(
@@ -542,7 +569,9 @@ function App() {
               onClick: item.type === "card" ? () => setHandModalCardId(item.cardId) : undefined,
               onDragStart:
                 item.type === "card"
-                  ? () => {
+                  ? (event) => {
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", item.cardId);
                       setDraggedHandIndex(item.originalIndex);
                       setHandRaised(true);
                       setHandDropIndex(null);
