@@ -154,9 +154,15 @@ button {
 }
 
 .player-hand-zone {
-  bottom: 28px;
+  bottom: -36px;
   justify-content: center;
   align-items: center;
+  transition: transform 180ms ease;
+  transform: translateY(0);
+}
+
+.player-hand-zone.raised {
+  transform: translateY(-44px);
 }
 
 .card-hand,
