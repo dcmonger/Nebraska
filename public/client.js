@@ -12,6 +12,10 @@ function cardLabel(card) {
   return `${card.rank}${card.suit}`;
 }
 
+function isRedSuit(card) {
+  return card && (card.suit === "♥" || card.suit === "♦");
+}
+
 function clampMenuPosition(clickX, clickY, menuEl) {
   const margin = 10;
   if (!menuEl) return { x: clickX, y: clickY };
@@ -122,7 +126,7 @@ function App() {
           y: event.clientY - handDragging.offsetY,
         });
 
-        if (shouldTreatAsHandDrop(event.clientY)) {
+        if (isPointerInHandZone(event.clientX, event.clientY)) {
           setHandDropIndex(normalizeHandDropIndex(getHandInsertIndex(event.clientX), handDragging.sourceIndex));
           setBoardDropPreview(null);
           return;
@@ -171,7 +175,7 @@ function App() {
       if (handDragging) {
         if (!handDragging.moved) {
           setHandModalCardId(handDragging.cardId);
-        } else if (shouldTreatAsHandDrop(event.clientY)) {
+        } else if (isPointerInHandZone(event.clientX, event.clientY)) {
           await onHandDrop(getHandInsertIndex(event.clientX), handDragging.sourceIndex);
         } else {
           const preview = getBoardDropPreview(event);
@@ -386,10 +390,17 @@ function App() {
     return clientY >= rect.bottom - HAND_SNAP_MARGIN;
   }
 
-  function getHandInsertIndex(clientX) {
+  function isPointerInHandZone(clientX, clientY) {
     const handZone = handZoneRef.current;
-    if (!handZone) return myHandIds.length;
+    if (!handZone) return shouldTreatAsHandDrop(clientY);
     const rect = handZone.getBoundingClientRect();
+    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+  }
+
+  function getHandInsertIndex(clientX) {
+    const tableEl = tableRef.current;
+    if (!tableEl) return myHandIds.length;
+    const rect = tableEl.getBoundingClientRect();
     const relativeX = clientX - rect.left - handLayout.startX;
     if (myHandIds.length <= 1 || handLayout.spacing <= 0) {
       return relativeX < handLayout.cardWidth / 2 ? 0 : myHandIds.length;
@@ -512,7 +523,7 @@ function App() {
                 "div",
                 {
                   key: cardId,
-                  className: `card ${card.faceUp ? "faceup" : "facedown"} ${
+                  className: `card ${card.faceUp ? "faceup" : "facedown"} ${card.faceUp && isRedSuit(card) ? "card-red" : ""} ${
                     isStackHighlighted && index === cardsToRender.length - 1 ? "card-stack-highlight" : ""
                   }`,
                   style: {
@@ -541,7 +552,7 @@ function App() {
             "div",
             {
               key: `${item.type}-${item.cardId}-${idx}`,
-              className: `card faceup card-hand ${item.type === "ghost" ? "card-hand-ghost" : ""}`,
+              className: `card faceup card-hand ${isRedSuit(card) ? "card-red" : ""} ${item.type === "ghost" ? "card-hand-ghost" : ""}`,
               style: { left: `${left}px`, zIndex: String(idx + 1) },
               onPointerDown:
                 item.type === "card"
@@ -578,7 +589,7 @@ function App() {
         ? React.createElement(
             "div",
             {
-              className: "card faceup card-hand card-hand-dragging",
+              className: `card faceup card-hand card-hand-dragging ${isRedSuit(game.state.cards[handDragPreview.cardId]) ? "card-red" : ""}`,
               style: {
                 left: `${handDragPreview.x}px`,
                 top: `${handDragPreview.y}px`,
@@ -624,7 +635,7 @@ function App() {
             React.createElement(
               "div",
               {
-                className: `card card-large ${game.state.cards[handModalCardId]?.faceUp ? "faceup" : "facedown"}`,
+                className: `card card-large ${game.state.cards[handModalCardId]?.faceUp ? "faceup" : "facedown"} ${isRedSuit(game.state.cards[handModalCardId]) ? "card-red" : ""}`,
               },
               game.state.cards[handModalCardId]?.faceUp ? cardLabel(game.state.cards[handModalCardId]) : "🂠",
             ),
@@ -643,7 +654,7 @@ function App() {
             React.createElement(
               "div",
               {
-                className: `card card-large ${game.state.cards[stackModalCardId]?.faceUp ? "faceup" : "facedown"}`,
+                className: `card card-large ${game.state.cards[stackModalCardId]?.faceUp ? "faceup" : "facedown"} ${isRedSuit(game.state.cards[stackModalCardId]) ? "card-red" : ""}`,
               },
               game.state.cards[stackModalCardId]?.faceUp ? cardLabel(game.state.cards[stackModalCardId]) : "🂠",
             ),
@@ -663,7 +674,7 @@ function App() {
               ? React.createElement(
                   "div",
                   {
-                    className: `card card-large ${stackModalCards[0].faceUp ? "faceup" : "facedown"}`,
+                    className: `card card-large ${stackModalCards[0].faceUp ? "faceup" : "facedown"} ${isRedSuit(stackModalCards[0]) ? "card-red" : ""}`,
                   },
                   stackModalCards[0].faceUp ? cardLabel(stackModalCards[0]) : "🂠",
                 )
@@ -680,7 +691,7 @@ function App() {
                       },
                       React.createElement(
                         "div",
-                        { className: `card card-grid ${card.faceUp ? "faceup" : "facedown"}` },
+                        { className: `card card-grid ${card.faceUp ? "faceup" : "facedown"} ${isRedSuit(card) ? "card-red" : ""}` },
                         card.faceUp ? cardLabel(card) : "🂠",
                       ),
                     ),

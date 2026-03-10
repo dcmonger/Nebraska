@@ -152,6 +152,10 @@ button {
   color: black;
 }
 
+.card-red {
+  color: #cc1f1f;
+}
+
 .card.facedown {
   background: repeating-linear-gradient(45deg, #183a7e, #183a7e 8px, #2b5bb5 8px, #2b5bb5 16px);
   color: #d8e7ff;
@@ -175,8 +179,8 @@ button {
 
 .player-hand-zone {
   bottom: -36px;
-  left: 12.5%;
-  right: 12.5%;
+  left: 0;
+  right: 0;
   transition: transform 180ms ease;
   transform: translateY(0);
   display: block;
