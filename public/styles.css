@@ -307,3 +307,13 @@ dialog {
 .overlay-front {
   z-index: 1100;
 }
+
+
+.overlay-preview {
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.overlay-preview dialog {
+  pointer-events: none;
+}

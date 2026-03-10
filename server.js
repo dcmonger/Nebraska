@@ -7,7 +7,7 @@ const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 2;
 const TABLE_MIN = 20;
 const TABLE_MAX_X = 980;
-const TABLE_MAX_Y = 640;
+const TABLE_MAX_Y = 900;
 
 const SUITS = ["♠", "♥", "♦", "♣"];
 const RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
@@ -21,7 +21,7 @@ function createDeckCards() {
   for (const suit of SUITS) {
     for (const rank of RANKS) {
       const id = `${rank}${suit}`;
-      cards.push({ id, suit, rank, faceUp: false });
+      cards.push({ id, suit, rank, faceUp: false, tapped: false });
     }
   }
   for (let i = cards.length - 1; i > 0; i -= 1) {
@@ -151,6 +151,41 @@ function payloadForPlayer(playerId) {
       log: state.log,
     },
   };
+}
+
+
+function setTappedState(stack, scope = "top", cardId = null, tapped = null) {
+  if (!stack || stack.cardIds.length === 0) return 0;
+
+  const shouldTap = (card) => (typeof tapped === "boolean" ? tapped : !card.tapped);
+
+  if (scope === "all") {
+    let changed = 0;
+    for (const id of stack.cardIds) {
+      const card = state.cards[id];
+      if (!card) continue;
+      const next = shouldTap(card);
+      if (card.tapped !== next) {
+        card.tapped = next;
+        changed += 1;
+      }
+    }
+    return changed;
+  }
+
+  let targetId = null;
+  if (scope === "card" && cardId && stack.cardIds.includes(cardId)) {
+    targetId = cardId;
+  } else {
+    targetId = stack.cardIds[stack.cardIds.length - 1];
+  }
+
+  const card = state.cards[targetId];
+  if (!card) return 0;
+  const next = shouldTap(card);
+  if (card.tapped === next) return 0;
+  card.tapped = next;
+  return 1;
 }
 
 function mergeStacks(sourceId, targetId, playerId) {
@@ -390,6 +425,28 @@ const server = http.createServer(async (req, res) => {
     addLog(player.id, "shuffled", `stack ${stack.id}`);
     broadcast();
     return sendJson(res, 200, { ok: true });
+  }
+
+
+  if (req.method === "POST" && url.pathname === "/api/tap") {
+    const player = getSession(req);
+    if (!player) return sendJson(res, 401, { error: "Login required." });
+
+    const body = await readBody(req).catch(() => null);
+    const stack = state.stacks[body?.stackId];
+    if (!stack) return sendJson(res, 404, { error: "Stack not found" });
+
+    const scope = body?.scope === "all" || body?.scope === "card" ? body.scope : "top";
+    const changed = setTappedState(stack, scope, body?.cardId || null, body?.tapped);
+    if (changed === 0) return sendJson(res, 200, { ok: true, changed: 0 });
+
+    if (scope === "all") {
+      addLog(player.id, body?.tapped === false ? "untapped" : "tapped", `all in ${stack.id}`);
+    } else {
+      addLog(player.id, body?.tapped === false ? "untapped" : "tapped", `card in ${stack.id}`);
+    }
+    broadcast();
+    return sendJson(res, 200, { ok: true, changed });
   }
 
   if (req.method === "POST" && url.pathname === "/api/move") {

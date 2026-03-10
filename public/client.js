@@ -4,12 +4,14 @@ const SNAP_DISTANCE = 90;
 const TABLE_MIN_X = 20;
 const TABLE_MAX_X = 980;
 const TABLE_MIN_Y = 20;
-const TABLE_MAX_Y = 640;
+const TABLE_MAX_Y = 900;
 const HAND_REVEAL_MARGIN = 170;
 const HAND_SNAP_MARGIN = 190;
+const BOARD_CARD_WIDTH = 78;
+const BOARD_CARD_HEIGHT = 112;
 
 function cardLabel(card) {
-  return `${card.rank}${card.suit}`;
+  return `${card.rank}${card.suit}\uFE0E`;
 }
 
 function isRedSuit(card) {
@@ -39,15 +41,14 @@ function App() {
   const [game, setGame] = useState({ players: [], state: { cards: {}, stacks: {}, hands: {} } });
   const [highlightedTargetId, setHighlightedTargetId] = useState(null);
   const [menuState, setMenuState] = useState({ visible: false, x: 0, y: 0, stackId: null });
-  const [stackModalStackId, setStackModalStackId] = useState(null);
   const [draggedHandIndex, setDraggedHandIndex] = useState(null);
   const [handDropIndex, setHandDropIndex] = useState(null);
   const [boardDropPreview, setBoardDropPreview] = useState(null);
   const [handRaised, setHandRaised] = useState(false);
-  const [handModalCardId, setHandModalCardId] = useState(null);
-  const [stackModalCardId, setStackModalCardId] = useState(null);
+  const [hoverPreviewCardId, setHoverPreviewCardId] = useState(null);
   const [tableWidth, setTableWidth] = useState(typeof window === "undefined" ? 1200 : window.innerWidth);
   const [handDragPreview, setHandDragPreview] = useState(null);
+  const [handInsertGhostCardId, setHandInsertGhostCardId] = useState(null);
 
   const tableRef = useRef(null);
   const handZoneRef = useRef(null);
@@ -57,6 +58,7 @@ function App() {
   const gameRef = useRef(game);
   const meRef = useRef(me);
   const tokenRef = useRef(token);
+  const hoverTimerRef = useRef(null);
 
   useEffect(() => {
     gameRef.current = game;
@@ -69,6 +71,10 @@ function App() {
   useEffect(() => {
     tokenRef.current = token;
   }, [token]);
+
+  useEffect(() => () => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (!tableRef.current) return undefined;
@@ -122,8 +128,8 @@ function App() {
 
         setHandDragPreview({
           cardId: handDragging.cardId,
-          x: event.clientX - handDragging.offsetX,
-          y: event.clientY - handDragging.offsetY,
+          x: event.clientX - BOARD_CARD_WIDTH / 2,
+          y: event.clientY - BOARD_CARD_HEIGHT / 2,
         });
 
         if (isPointerInHandZone(event.clientX, event.clientY)) {
@@ -158,13 +164,17 @@ function App() {
         });
 
         if (shouldTreatAsHandDrop(event.clientY)) {
+          const draggingStack = gameRef.current.state.stacks[dragging.stackId];
+          const topCardId = draggingStack?.cardIds?.[draggingStack.cardIds.length - 1] || null;
           setHandRaised(true);
+          setHandInsertGhostCardId(topCardId);
           setHandDropIndex(getHandInsertIndex(event.clientX));
           setHighlightedTargetId(null);
           return;
         }
 
         setHandDropIndex(null);
+        setHandInsertGhostCardId(null);
         const targetId = getTargetStackId(dragging.stackId, newX, newY, gameRef.current);
         setHighlightedTargetId(targetId);
       }
@@ -173,11 +183,9 @@ function App() {
     async function onPointerUp(event) {
       const handDragging = handDraggingRef.current;
       if (handDragging) {
-        if (!handDragging.moved) {
-          setHandModalCardId(handDragging.cardId);
-        } else if (isPointerInHandZone(event.clientX, event.clientY)) {
+        if (handDragging.moved && isPointerInHandZone(event.clientX, event.clientY)) {
           await onHandDrop(getHandInsertIndex(event.clientX), handDragging.sourceIndex);
-        } else {
+        } else if (handDragging.moved) {
           const preview = getBoardDropPreview(event);
           if (preview) {
             const world = viewToWorld(preview.x, preview.y, gameRef.current, meRef.current);
@@ -196,6 +204,7 @@ function App() {
         setHandDropIndex(null);
         setBoardDropPreview(null);
         setHandDragPreview(null);
+        setHandInsertGhostCardId(null);
         setHandRaised(false);
         return;
       }
@@ -230,6 +239,7 @@ function App() {
       draggingRef.current = null;
       setHighlightedTargetId(null);
       setHandDropIndex(null);
+      setHandInsertGhostCardId(null);
       setHandRaised(false);
     }
 
@@ -298,20 +308,29 @@ function App() {
     } else if (action === "shuffle") {
       const result = await api("/api/shuffle", { stackId });
       if (result.error) setLoginMessage(result.error);
-    } else if (action === "inspect") {
-      setStackModalStackId(stackId);
-      setStackModalCardId(null);
+    } else if (action === "tap-all") {
+      await api("/api/tap", { stackId, scope: "all", tapped: true });
+    } else if (action === "untap-all") {
+      await api("/api/tap", { stackId, scope: "all", tapped: false });
     }
 
     setMenuState((current) => ({ ...current, visible: false }));
   }
 
-  const stackModalCards = useMemo(() => {
-    if (!stackModalStackId) return [];
-    const stack = game.state.stacks[stackModalStackId];
-    if (!stack) return [];
-    return [...stack.cardIds].reverse().map((cardId) => game.state.cards[cardId]);
-  }, [stackModalStackId, game]);
+  function handleCardHoverStart(cardId) {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => {
+      setHoverPreviewCardId(cardId);
+    }, 1500);
+  }
+
+  function handleCardHoverEnd(cardId) {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    setHoverPreviewCardId((current) => (current === cardId ? null : current));
+  }
 
   const perspectiveP2 = isPlayerTwoPerspective(game, me);
   const myHandIds = me ? game.state.hands?.[me.id]?.cardIds || [] : [];
@@ -365,8 +384,8 @@ function App() {
   function getBoardDropPreview(event) {
     if (!tableRef.current) return null;
     const rect = tableRef.current.getBoundingClientRect();
-    const viewX = event.clientX - rect.left - 39;
-    const viewY = event.clientY - rect.top - 56;
+    const viewX = event.clientX - rect.left - BOARD_CARD_WIDTH / 2;
+    const viewY = event.clientY - rect.top - BOARD_CARD_HEIGHT / 2;
     const world = viewToWorld(viewX, viewY, gameRef.current, meRef.current);
     const targetStackId = getTargetStackId(null, world.x, world.y, gameRef.current);
 
@@ -410,7 +429,13 @@ function App() {
 
   const handPreviewItems = useMemo(() => {
     const items = myHandIds.map((cardId, idx) => ({ type: "card", cardId, originalIndex: idx }));
-    if (draggedHandIndex === null) return items;
+    if (draggedHandIndex === null) {
+      if (handInsertGhostCardId !== null && handDropIndex !== null) {
+        const insertionIndex = Math.max(0, Math.min(items.length, handDropIndex));
+        items.splice(insertionIndex, 0, { type: "ghost", cardId: handInsertGhostCardId, originalIndex: -1 });
+      }
+      return items;
+    }
 
     const draggedItem = items[draggedHandIndex];
     const remainingItems = items.filter((_, idx) => idx !== draggedHandIndex);
@@ -427,7 +452,15 @@ function App() {
       originalIndex: draggedHandIndex,
     });
     return remainingItems;
-  }, [myHandIds, draggedHandIndex, handDropIndex]);
+  }, [myHandIds, draggedHandIndex, handDropIndex, handInsertGhostCardId]);
+
+  async function tapStack(stackId) {
+    await api("/api/tap", { stackId, scope: "top" });
+  }
+
+  async function tapCard(stackId, cardId) {
+    await api("/api/tap", { stackId, scope: "card", cardId });
+  }
 
   return React.createElement(
     React.Fragment,
@@ -519,6 +552,10 @@ function App() {
                 "--stack-top-offset": `${topCardOffset}px`,
               },
               onPointerDown: (event) => onStackPointerDown(event, stack.id, viewedPosition),
+              onDoubleClick: (event) => {
+                event.preventDefault();
+                tapStack(stack.id);
+              },
             },
             cardsToRender.map((cardId, index) => {
               const card = game.state.cards[cardId];
@@ -529,8 +566,14 @@ function App() {
                   className: `card ${card.faceUp ? "faceup" : "facedown"} ${card.faceUp && isRedSuit(card) ? "card-red" : ""} ${
                     isStackHighlighted && index === cardsToRender.length - 1 ? "card-stack-highlight" : ""
                   }`,
+                  onMouseEnter: () => handleCardHoverStart(cardId),
+                  onMouseLeave: () => handleCardHoverEnd(cardId),
+                  onDoubleClick: (event) => {
+                    event.stopPropagation();
+                    tapCard(stack.id, cardId);
+                  },
                   style: {
-                    transform: `translate(${index * offset}px, ${index * offset}px)`,
+                    transform: `translate(${index * offset}px, ${index * offset}px)${card.tapped ? " rotate(90deg)" : ""}`,
                     zIndex: String(index),
                   },
                 },
@@ -556,7 +599,9 @@ function App() {
             {
               key: `${item.type}-${item.cardId}-${idx}`,
               className: `card faceup card-hand ${isRedSuit(card) ? "card-red" : ""} ${item.type === "ghost" ? "card-hand-ghost" : ""}`,
-              style: { left: `${left}px`, zIndex: String(idx + 1) },
+              style: { left: `${left}px`, zIndex: String(idx + 1), transform: card.tapped ? "rotate(90deg)" : undefined },
+              onMouseEnter: () => handleCardHoverStart(item.cardId),
+              onMouseLeave: () => handleCardHoverEnd(item.cardId),
               onPointerDown:
                 item.type === "card"
                   ? (event) => {
@@ -597,6 +642,7 @@ function App() {
                 left: `${handDragPreview.x}px`,
                 top: `${handDragPreview.y}px`,
                 zIndex: "999",
+                transform: game.state.cards[handDragPreview.cardId]?.tapped ? "rotate(90deg)" : undefined,
               },
             },
             cardLabel(game.state.cards[handDragPreview.cardId]),
@@ -623,84 +669,32 @@ function App() {
             game.state.stacks[menuState.stackId] && game.state.stacks[menuState.stackId].cardIds.length > 1
               ? React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("shuffle") }, "Shuffle")
               : null,
-            React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("inspect") }, "Inspect"),
+            game.state.stacks[menuState.stackId] &&
+            game.state.stacks[menuState.stackId].cardIds.some((cardId) => !game.state.cards[cardId]?.tapped)
+              ? React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("tap-all") }, "Tap all")
+              : null,
+            game.state.stacks[menuState.stackId] &&
+            game.state.stacks[menuState.stackId].cardIds.some((cardId) => game.state.cards[cardId]?.tapped)
+              ? React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("untap-all") }, "Untap all")
+              : null,
           ),
         )
       : null,
-    handModalCardId
+    hoverPreviewCardId
       ? React.createElement(
           "div",
-          { className: "overlay", onClick: () => setHandModalCardId(null) },
-          React.createElement(
-            "dialog",
-            { open: true, onClick: (event) => event.stopPropagation() },
-            React.createElement("h3", null, "Card"),
-            React.createElement(
-              "div",
-              {
-                className: `card card-large ${game.state.cards[handModalCardId]?.faceUp ? "faceup" : "facedown"} ${isRedSuit(game.state.cards[handModalCardId]) ? "card-red" : ""}`,
-              },
-              game.state.cards[handModalCardId]?.faceUp ? cardLabel(game.state.cards[handModalCardId]) : "🂠",
-            ),
-            React.createElement("button", { onClick: () => setHandModalCardId(null) }, "Close"),
-          ),
-        )
-      : null,
-    stackModalCardId
-      ? React.createElement(
-          "div",
-          { className: "overlay overlay-front", onClick: () => setStackModalCardId(null) },
-          React.createElement(
-            "dialog",
-            { open: true, onClick: (event) => event.stopPropagation() },
-            React.createElement("h3", null, "Card"),
-            React.createElement(
-              "div",
-              {
-                className: `card card-large ${game.state.cards[stackModalCardId]?.faceUp ? "faceup" : "facedown"} ${isRedSuit(game.state.cards[stackModalCardId]) ? "card-red" : ""}`,
-              },
-              game.state.cards[stackModalCardId]?.faceUp ? cardLabel(game.state.cards[stackModalCardId]) : "🂠",
-            ),
-            React.createElement("button", { onClick: () => setStackModalCardId(null) }, "Close"),
-          ),
-        )
-      : null,
-    stackModalStackId
-      ? React.createElement(
-          "div",
-          { className: "overlay" },
+          { className: "overlay overlay-preview" },
           React.createElement(
             "dialog",
             { open: true },
-            React.createElement("h3", null, "Stack Inspector"),
-            stackModalCards.length === 1
-              ? React.createElement(
-                  "div",
-                  {
-                    className: `card card-large ${stackModalCards[0].faceUp ? "faceup" : "facedown"} ${isRedSuit(stackModalCards[0]) ? "card-red" : ""}`,
-                  },
-                  stackModalCards[0].faceUp ? cardLabel(stackModalCards[0]) : "🂠",
-                )
-              : React.createElement(
-                  "div",
-                  { className: "stack-grid" },
-                  stackModalCards.map((card, idx) =>
-                    React.createElement(
-                      "div",
-                      {
-                        key: `${card.id}-${idx}`,
-                        className: "grid-tile",
-                        onClick: () => setStackModalCardId(card.id),
-                      },
-                      React.createElement(
-                        "div",
-                        { className: `card card-grid ${card.faceUp ? "faceup" : "facedown"} ${isRedSuit(card) ? "card-red" : ""}` },
-                        card.faceUp ? cardLabel(card) : "🂠",
-                      ),
-                    ),
-                  ),
-                ),
-            React.createElement("button", { onClick: () => { setStackModalCardId(null); setStackModalStackId(null); } }, "Close"),
+            React.createElement(
+              "div",
+              {
+                className: `card card-large ${game.state.cards[hoverPreviewCardId]?.faceUp ? "faceup" : "facedown"} ${isRedSuit(game.state.cards[hoverPreviewCardId]) ? "card-red" : ""}`,
+                style: { transform: game.state.cards[hoverPreviewCardId]?.tapped ? "rotate(90deg)" : undefined },
+              },
+              game.state.cards[hoverPreviewCardId]?.faceUp ? cardLabel(game.state.cards[hoverPreviewCardId]) : "🂠",
+            ),
           ),
         )
       : null,
