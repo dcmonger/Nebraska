@@ -42,20 +42,46 @@ button {
 .table {
   position: relative;
   overflow: hidden;
-  background: radial-gradient(circle at center, #26734f 0%, #145133 60%, #0f3b27 100%);
+  background: linear-gradient(180deg, #1c583b 0%, #145133 47%, #0f3b27 53%, #184a31 100%);
+}
+
+.table::before,
+.table::after {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  color: rgba(255, 255, 255, 0.28);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.table::before {
+  content: "Player 2 side";
+  top: 12px;
+}
+
+.table::after {
+  content: "Player 1 side";
+  bottom: 12px;
 }
 
 .stack {
   position: absolute;
-  width: 78px;
-  height: 112px;
+  width: 98px;
+  height: 146px;
   cursor: grab;
   user-select: none;
 }
 
+.stack-highlight {
+  outline: 3px solid #ffd447;
+  border-radius: 10px;
+}
+
 .stack-count {
   position: absolute;
-  right: -10px;
+  right: -8px;
   top: -10px;
   background: #101010;
   border: 1px solid #808080;
@@ -65,11 +91,13 @@ button {
   display: grid;
   place-items: center;
   font-size: 12px;
+  z-index: 50;
 }
 
 .card {
   position: absolute;
-  inset: 0;
+  width: 78px;
+  height: 112px;
   border-radius: 8px;
   border: 1px solid #111;
   display: grid;
@@ -77,6 +105,7 @@ button {
   font-size: 22px;
   font-weight: bold;
   box-shadow: 0 4px 7px rgba(0, 0, 0, 0.35);
+  transform-origin: center;
 }
 
 .card.faceup {
@@ -87,6 +116,63 @@ button {
 .card.facedown {
   background: repeating-linear-gradient(45deg, #183a7e, #183a7e 8px, #2b5bb5 8px, #2b5bb5 16px);
   color: #d8e7ff;
+}
+
+.card-menu {
+  position: fixed;
+  z-index: 999;
+  width: 240px;
+  background: #102219;
+  border: 1px solid #406851;
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  padding: 10px;
+}
+
+.menu-buttons {
+  display: grid;
+  gap: 8px;
+}
+
+.menu-btn {
+  width: 100%;
+}
+
+.hidden {
+  display: none;
+}
+
+.card-large {
+  position: static;
+  width: 170px;
+  height: 244px;
+  font-size: 48px;
+  margin: 12px auto;
+}
+
+.stack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  max-height: 60vh;
+  overflow: auto;
+  min-width: 520px;
+}
+
+.grid-tile {
+  padding: 8px;
+  border: 1px solid #385e4c;
+  border-radius: 8px;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+
+.card-grid {
+  position: static;
+  width: 70px;
+  height: 100px;
+  font-size: 22px;
 }
 
 dialog {

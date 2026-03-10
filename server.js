@@ -5,7 +5,6 @@ const { URL } = require("url");
 
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 2;
-const SNAP_DISTANCE = 90;
 
 const SUITS = ["♠", "♥", "♦", "♣"];
 const RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
@@ -37,8 +36,9 @@ function createInitialState() {
       deck: {
         id: "deck",
         cardIds: deckCards.map((c) => c.id),
-        x: 100,
-        y: 180,
+        x: 120,
+        y: 260,
+        ownerId: null,
       },
     },
     nextStackId: 1,
@@ -49,19 +49,33 @@ function clampTable(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function maybeSnapStack(movingStackId) {
-  const moving = state.stacks[movingStackId];
-  if (!moving) return;
-
-  for (const stack of Object.values(state.stacks)) {
-    if (stack.id === moving.id) continue;
-    const distance = Math.hypot(stack.x - moving.x, stack.y - moving.y);
-    if (distance < SNAP_DISTANCE) {
-      stack.cardIds = stack.cardIds.concat(moving.cardIds);
-      delete state.stacks[moving.id];
-      return;
-    }
+function drawTopCardToNewStack(sourceStack, playerId) {
+  if (!sourceStack || sourceStack.cardIds.length === 0) return null;
+  const cardId = sourceStack.cardIds.pop();
+  const stackId = `stack-${state.nextStackId++}`;
+  const offset = Math.floor(Math.random() * 25);
+  state.stacks[stackId] = {
+    id: stackId,
+    cardIds: [cardId],
+    x: clampTable(sourceStack.x + 120 + offset, 20, 980),
+    y: clampTable(sourceStack.y + 20 + offset, 20, 560),
+    ownerId: playerId,
+  };
+  if (sourceStack.cardIds.length === 0 && sourceStack.id !== "deck") {
+    delete state.stacks[sourceStack.id];
   }
+  return stackId;
+}
+
+function mergeStacks(sourceId, targetId, playerId) {
+  const source = state.stacks[sourceId];
+  const target = state.stacks[targetId];
+  if (!source || !target || source.id === target.id) return false;
+  if (source.id === "deck") return false;
+  target.cardIds = target.cardIds.concat(source.cardIds);
+  target.ownerId = playerId;
+  delete state.stacks[source.id];
+  return true;
 }
 
 function currentPayload() {
@@ -156,20 +170,18 @@ const server = http.createServer(async (req, res) => {
     const player = getSession(req);
     if (!player) return sendJson(res, 401, { error: "Login required." });
 
-    const deck = state.stacks.deck;
-    if (!deck || deck.cardIds.length === 0) return sendJson(res, 400, { error: "Deck empty" });
+    const body = await readBody(req).catch(() => null);
+    const sourceStack = state.stacks[body?.stackId || "deck"];
+    if (!sourceStack || sourceStack.cardIds.length === 0) {
+      return sendJson(res, 400, { error: "No cards to draw from this stack." });
+    }
 
-    const cardId = deck.cardIds.pop();
-    state.cards[cardId].faceUp = true;
-    const stackId = `stack-${state.nextStackId++}`;
-    state.stacks[stackId] = {
-      id: stackId,
-      cardIds: [cardId],
-      x: 270 + Math.floor(Math.random() * 420),
-      y: 160 + Math.floor(Math.random() * 250),
-    };
+    const newStackId = drawTopCardToNewStack(sourceStack, player.id);
+    if (!newStackId) return sendJson(res, 400, { error: "Unable to draw." });
+
+    state.cards[state.stacks[newStackId].cardIds[0]].faceUp = true;
     broadcast();
-    return sendJson(res, 200, { ok: true });
+    return sendJson(res, 200, { ok: true, stackId: newStackId });
   }
 
   if (req.method === "POST" && url.pathname === "/api/flip") {
@@ -177,9 +189,26 @@ const server = http.createServer(async (req, res) => {
     if (!player) return sendJson(res, 401, { error: "Login required." });
 
     const body = await readBody(req).catch(() => null);
-    const card = state.cards[body?.cardId];
+    const stack = state.stacks[body?.stackId];
+    if (!stack) return sendJson(res, 404, { error: "Stack not found" });
+
+    if (body?.scope === "stack") {
+      for (const cardId of stack.cardIds) {
+        const card = state.cards[cardId];
+        card.faceUp = !card.faceUp;
+      }
+      broadcast();
+      return sendJson(res, 200, { ok: true });
+    }
+
+    const topCardId = stack.cardIds[stack.cardIds.length - 1];
+    const card = state.cards[topCardId];
     if (!card) return sendJson(res, 404, { error: "Card not found" });
-    card.faceUp = !card.faceUp;
+    if (body?.faceUp === true || body?.faceUp === false) {
+      card.faceUp = body.faceUp;
+    } else {
+      card.faceUp = !card.faceUp;
+    }
     broadcast();
     return sendJson(res, 200, { ok: true });
   }
@@ -194,7 +223,18 @@ const server = http.createServer(async (req, res) => {
 
     stack.x = clampTable(Number(body.x) || 0, 20, 980);
     stack.y = clampTable(Number(body.y) || 0, 20, 560);
-    maybeSnapStack(stack.id);
+    stack.ownerId = player.id;
+    broadcast();
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/stack") {
+    const player = getSession(req);
+    if (!player) return sendJson(res, 401, { error: "Login required." });
+
+    const body = await readBody(req).catch(() => null);
+    const merged = mergeStacks(body?.sourceStackId, body?.targetStackId, player.id);
+    if (!merged) return sendJson(res, 400, { error: "Unable to stack." });
     broadcast();
     return sendJson(res, 200, { ok: true });
   }
