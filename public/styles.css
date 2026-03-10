@@ -27,6 +27,21 @@ body {
   border-radius: 8px;
 }
 
+.log-list {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 240px;
+  overflow: auto;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.log-empty {
+  opacity: 0.7;
+  font-style: italic;
+}
+
 input,
 button {
   width: 100%;
