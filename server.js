@@ -219,11 +219,11 @@ const server = http.createServer(async (req, res) => {
 
     const body = await readBody(req).catch(() => null);
     const stack = state.stacks[body?.stackId];
-    if (!stack || stack.id === "deck") return sendJson(res, 404, { error: "Stack not found" });
+    if (!stack) return sendJson(res, 404, { error: "Stack not found" });
 
     stack.x = clampTable(Number(body.x) || 0, 20, 980);
     stack.y = clampTable(Number(body.y) || 0, 20, 560);
-    stack.ownerId = player.id;
+    if (stack.id !== "deck") stack.ownerId = player.id;
     broadcast();
     return sendJson(res, 200, { ok: true });
   }

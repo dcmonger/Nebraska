@@ -12,6 +12,10 @@ const stackModal = document.getElementById("stackModal");
 const stackGrid = document.getElementById("stackGrid");
 
 const SNAP_DISTANCE = 90;
+const TABLE_MIN_X = 20;
+const TABLE_MAX_X = 980;
+const TABLE_MIN_Y = 20;
+const TABLE_MAX_Y = 560;
 
 let token = null;
 let me = null;
@@ -59,12 +63,30 @@ function cardLabel(card) {
 }
 
 function seatForPlayer(playerId) {
+  if (me && playerId === me.id) return "bottom";
   const idx = game.players.findIndex((player) => player.id === playerId);
-  return idx === 1 ? "top" : "bottom";
+  return idx === -1 ? "bottom" : "top";
 }
 
-function stackRotation(stack) {
-  return seatForPlayer(stack.ownerId) === "top" ? "rotate(180deg)" : "none";
+function isPlayerTwoPerspective() {
+  if (!me) return false;
+  return game.players.findIndex((player) => player.id === me.id) === 1;
+}
+
+function worldToView(x, y) {
+  if (!isPlayerTwoPerspective()) return { x, y };
+  return {
+    x: TABLE_MIN_X + TABLE_MAX_X - x,
+    y: TABLE_MIN_Y + TABLE_MAX_Y - y,
+  };
+}
+
+function viewToWorld(x, y) {
+  if (!isPlayerTwoPerspective()) return { x, y };
+  return {
+    x: TABLE_MIN_X + TABLE_MAX_X - x,
+    y: TABLE_MIN_Y + TABLE_MAX_Y - y,
+  };
 }
 
 function renderPlayers() {
@@ -99,17 +121,16 @@ function menuAction(label, onClick) {
   menuButtons.appendChild(button);
 }
 
-function showTopCardModal(card, rotation) {
+function showTopCardModal(card) {
   cardModalContent.innerHTML = "";
   const preview = document.createElement("div");
   preview.className = `card card-large ${card.faceUp ? "faceup" : "facedown"}`;
   preview.textContent = card.faceUp ? cardLabel(card) : "🂠";
-  preview.style.transform = rotation;
   cardModalContent.appendChild(preview);
   cardModal.showModal();
 }
 
-function showStackGridModal(stack, rotation) {
+function showStackGridModal(stack) {
   stackGrid.innerHTML = "";
   [...stack.cardIds].reverse().forEach((cardId) => {
     const card = game.state.cards[cardId];
@@ -119,7 +140,6 @@ function showStackGridModal(stack, rotation) {
     const cardEl = document.createElement("div");
     cardEl.className = `card card-grid ${card.faceUp ? "faceup" : "facedown"}`;
     cardEl.textContent = card.faceUp ? cardLabel(card) : "🂠";
-    cardEl.style.transform = rotation;
 
     const caption = document.createElement("span");
     caption.textContent = `${cardLabel(card)} ${card.faceUp ? "(up)" : "(down)"}`;
@@ -133,7 +153,6 @@ function showStackGridModal(stack, rotation) {
 
 function showStackMenu(event, stack, topCard) {
   if (!me) return;
-  const rotation = stackRotation(stack);
   menuTitle.textContent = `Stack (${stack.cardIds.length} cards)`;
   menuButtons.innerHTML = "";
 
@@ -148,13 +167,13 @@ function showStackMenu(event, stack, topCard) {
     if (result.error) loginMessage.textContent = result.error;
   });
   menuAction("Inspect top card", async () => {
-    showTopCardModal(topCard, rotation);
+    showTopCardModal(topCard);
   });
   menuAction("Flip entire stack", async () => {
     await api("/api/flip", { stackId: stack.id, scope: "stack" });
   });
   menuAction("View each card in stack", async () => {
-    showStackGridModal(stack, rotation);
+    showStackGridModal(stack);
   });
 
   cardMenu.style.left = `${event.clientX}px`;
@@ -163,6 +182,7 @@ function showStackMenu(event, stack, topCard) {
 }
 
 function renderTable() {
+  table.classList.toggle("perspective-p2", isPlayerTwoPerspective());
   table.innerHTML = "";
   for (const stack of Object.values(game.state.stacks)) {
     if (stack.cardIds.length === 0) continue;
@@ -173,10 +193,10 @@ function renderTable() {
       stackEl.classList.add("stack-highlight");
     }
 
-    stackEl.style.left = `${stack.x}px`;
-    stackEl.style.top = `${stack.y}px`;
+    const viewedPosition = worldToView(stack.x, stack.y);
+    stackEl.style.left = `${viewedPosition.x}px`;
+    stackEl.style.top = `${viewedPosition.y}px`;
 
-    const rotation = stackRotation(stack);
     const visibleCount = Math.min(stack.cardIds.length, 6);
 
     for (let i = 0; i < visibleCount; i += 1) {
@@ -185,7 +205,7 @@ function renderTable() {
       const cardEl = document.createElement("div");
       cardEl.className = `card ${card.faceUp ? "faceup" : "facedown"}`;
       cardEl.textContent = card.faceUp ? cardLabel(card) : "🂠";
-      cardEl.style.transform = `${rotation} translate(${i * 4}px, -${(visibleCount - i - 1) * 6}px)`;
+      cardEl.style.transform = `translate(${i * 8}px, ${i * 8}px)`;
       cardEl.style.zIndex = String(i);
       stackEl.appendChild(cardEl);
     }
@@ -207,8 +227,8 @@ function renderTable() {
         originX: event.clientX,
         originY: event.clientY,
         moved: false,
-        offsetX: event.clientX - rect.left - stack.x,
-        offsetY: event.clientY - rect.top - stack.y,
+        offsetX: event.clientX - rect.left - viewedPosition.x,
+        offsetY: event.clientY - rect.top - viewedPosition.y,
       };
       stackEl.setPointerCapture(event.pointerId);
     });
@@ -238,8 +258,9 @@ function renderTable() {
 window.addEventListener("pointermove", async (event) => {
   if (!dragging) return;
   const rect = table.getBoundingClientRect();
-  const newX = event.clientX - rect.left - dragging.offsetX;
-  const newY = event.clientY - rect.top - dragging.offsetY;
+  const viewX = event.clientX - rect.left - dragging.offsetX;
+  const viewY = event.clientY - rect.top - dragging.offsetY;
+  const { x: newX, y: newY } = viewToWorld(viewX, viewY);
 
   if (Math.hypot(event.clientX - dragging.originX, event.clientY - dragging.originY) > 4) {
     dragging.moved = true;
