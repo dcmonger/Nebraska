@@ -23,17 +23,28 @@
       </div>
 
       <div class="panel">
-        <button id="drawBtn">Draw from deck</button>
-        <p>Double click top card to flip face up/down.</p>
+        <p>Left click any stack to open actions.</p>
+        <p>Drag and release on a highlighted stack to combine.</p>
       </div>
     </aside>
 
     <main id="table" class="table"></main>
 
-    <dialog id="stackDialog">
-      <h3>Stack inspector</h3>
-      <ul id="stackContents"></ul>
-      <button id="closeDialogBtn">Close</button>
+    <div id="cardMenu" class="card-menu hidden">
+      <h3 id="menuTitle">Stack actions</h3>
+      <div id="menuButtons" class="menu-buttons"></div>
+    </div>
+
+    <dialog id="cardModal">
+      <h3>Card Inspector</h3>
+      <div id="cardModalContent"></div>
+      <form method="dialog"><button>Close</button></form>
+    </dialog>
+
+    <dialog id="stackModal">
+      <h3>Stack Inspector</h3>
+      <div id="stackGrid" class="stack-grid"></div>
+      <form method="dialog"><button>Close</button></form>
     </dialog>
 
     <script src="client.js"></script>
