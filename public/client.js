@@ -9,7 +9,7 @@ const HOVER_PREVIEW_DELAY_MS = 500;
 const MENU_OPEN_DELAY_MS = 220;
 
 function cardLabel(card) {
-  return `${card.rank}${card.suit}\uFE0E`;
+  return `${card.rank}${card.suit}`;
 }
 
 function isRedSuit(card) {
@@ -34,7 +34,6 @@ function stackOffsetPx(cardCount, visibleCount) {
 function App() {
   const [token, setToken] = useState(null);
   const [me, setMe] = useState(null);
-  const [nameInput, setNameInput] = useState("");
   const [loginMessage, setLoginMessage] = useState("");
   const [game, setGame] = useState({ players: [], state: { cards: {}, stacks: {}, hands: {} } });
   const [highlightedTargetId, setHighlightedTargetId] = useState(null);
@@ -319,15 +318,15 @@ function App() {
     }
   }, [menuState]);
 
-  async function handleLogin() {
-    const result = await api("/api/login", { name: nameInput });
+  async function switchSeat(seatId) {
+    const result = await api("/api/login", { seat: seatId });
     if (result.error) {
       setLoginMessage(result.error);
       return;
     }
     setToken(result.token);
     setMe(result.player);
-    setLoginMessage(`Joined as ${result.player.name}`);
+    setLoginMessage(`Viewing as ${result.player.name}`);
   }
 
   function seatForPlayer(playerId) {
@@ -420,6 +419,8 @@ function App() {
 
   function handleCardHoverStart(cardId) {
     if (!cardId) return;
+    const card = gameRef.current.state.cards[cardId];
+    if (!card?.faceUp) return;
     if (draggingRef.current || handDraggingRef.current || draggedHandIndex !== null || handDragPreview) return;
     if (Date.now() - recentDoubleClickRef.current < 350) return;
     if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
@@ -493,10 +494,9 @@ function App() {
 
   function normalizeHandDropIndex(targetIndex, sourceIndex = draggedHandIndex) {
     if (targetIndex === null) return null;
-    if (sourceIndex === null) return targetIndex;
     const clamped = Math.max(0, Math.min(myHandIds.length, targetIndex));
-    if (clamped === sourceIndex) return null;
-    if (clamped > sourceIndex) return Math.min(myHandIds.length, clamped + 1);
+    if (sourceIndex === null) return clamped;
+    if (clamped === sourceIndex || clamped === sourceIndex + 1) return null;
     return clamped;
   }
 
@@ -578,10 +578,7 @@ function App() {
     if (handDropIndex === null) return remainingItems;
 
     const clampedPreviewIndex = Math.max(0, Math.min(items.length, handDropIndex));
-    const insertionIndex = Math.max(
-      0,
-      Math.min(remainingItems.length, clampedPreviewIndex > draggedHandIndex ? clampedPreviewIndex - 1 : clampedPreviewIndex),
-    );
+    const insertionIndex = Math.max(0, Math.min(remainingItems.length, clampedPreviewIndex));
     remainingItems.splice(insertionIndex, 0, {
       type: "ghost",
       cardId: draggedItem.cardId,
@@ -608,14 +605,9 @@ function App() {
       React.createElement(
         "div",
         { className: "panel" },
-        React.createElement("h2", null, "Login"),
-        React.createElement("input", {
-          value: nameInput,
-          onChange: (event) => setNameInput(event.target.value),
-          maxLength: 20,
-          placeholder: "Display name",
-        }),
-        React.createElement("button", { onClick: handleLogin }, "Join game"),
+        React.createElement("h2", null, "Seats"),
+        React.createElement("button", { onClick: () => switchSeat("player-1") }, "Player 1"),
+        React.createElement("button", { onClick: () => switchSeat("player-2") }, "Player 2"),
         React.createElement("p", null, loginMessage),
       ),
       React.createElement(
@@ -715,7 +707,7 @@ function App() {
                 {
                   key: cardId,
                   className: `card ${card.faceUp ? "faceup" : "facedown"} ${card.faceUp && isRedSuit(card) ? "card-red" : ""} ${
-                    isStackHighlighted && index === cardsToRender.length - 1 && !card.tapped ? "card-stack-highlight" : ""
+                    isStackHighlighted && index === cardsToRender.length - 1 ? "card-stack-highlight" : ""
                   }`,
                   onMouseEnter: () => handleCardHoverStart(cardId),
                   onMouseLeave: () => handleCardHoverEnd(cardId),

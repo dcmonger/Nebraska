@@ -114,7 +114,8 @@ button {
 }
 
 .stack-highlight.stack-highlight-tapped::after {
-  box-shadow: none;
+  border: 3px solid #ffd447;
+  box-shadow: 0 0 14px rgba(255, 212, 71, 0.45);
   transform: rotate(90deg);
   transform-origin: center;
 }
