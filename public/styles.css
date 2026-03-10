@@ -107,10 +107,15 @@ button {
   top: var(--stack-top-offset, 0);
   width: 78px;
   height: 112px;
-  border: 3px solid #ffd447;
   border-radius: 8px;
   box-sizing: border-box;
   pointer-events: none;
+  box-shadow: 0 0 14px rgba(255, 212, 71, 0.45);
+}
+
+.card-stack-highlight {
+  outline: 3px solid #ffd447;
+  outline-offset: -2px;
 }
 
 .stack-count {
@@ -172,10 +177,9 @@ button {
   bottom: -36px;
   left: 12.5%;
   right: 12.5%;
-  justify-content: center;
-  align-items: center;
   transition: transform 180ms ease;
   transform: translateY(0);
+  display: block;
 }
 
 .player-hand-zone.raised {
@@ -184,39 +188,28 @@ button {
 
 .card-hand,
 .card-hand-opponent {
-  position: relative;
   width: 90px;
   height: 130px;
   font-size: 26px;
   flex: 0 0 auto;
 }
 
+.card-hand-opponent {
+  position: relative;
+}
+
 .card-hand {
+  position: absolute;
   cursor: grab;
-  margin-left: var(--hand-spacing, 10px);
+  top: 8px;
 }
 
-.player-hand-zone .card-hand:first-of-type {
-  margin-left: 0;
-}
-
-.hand-dragging {
-  opacity: 0.5;
-}
-
-
-.hand-drop-line {
-  width: 8px;
-  flex: 0 0 8px;
-  height: 118px;
-  border-radius: 999px;
-  background: transparent;
-  transition: background 120ms ease;
-}
-
-.hand-drop-line.active {
-  background: #ffd447;
-  box-shadow: 0 0 10px rgba(255, 212, 71, 0.6);
+.card-hand-ghost {
+  background: #9a9a9a;
+  color: #2b2b2b;
+  opacity: 0.6;
+  border-color: #666;
+  pointer-events: none;
 }
 
 .board-drop-outline {
@@ -273,6 +266,7 @@ button {
   display: grid;
   justify-items: center;
   gap: 6px;
+  cursor: pointer;
 }
 
 .card-grid {
@@ -296,4 +290,8 @@ dialog {
   place-items: center;
   background: rgba(0, 0, 0, 0.35);
   z-index: 1000;
+}
+
+.overlay-front {
+  z-index: 1100;
 }
