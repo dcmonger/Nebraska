@@ -41,6 +41,7 @@ function App() {
   const [boardDropPreview, setBoardDropPreview] = useState(null);
   const [handRaised, setHandRaised] = useState(false);
   const [handModalCardId, setHandModalCardId] = useState(null);
+  const [stackModalCardId, setStackModalCardId] = useState(null);
   const [tableWidth, setTableWidth] = useState(typeof window === "undefined" ? 1200 : window.innerWidth);
 
   const tableRef = useRef(null);
@@ -237,6 +238,7 @@ function App() {
       if (result.error) setLoginMessage(result.error);
     } else if (action === "inspect") {
       setStackModalStackId(stackId);
+      setStackModalCardId(null);
     }
 
     setMenuState((current) => ({ ...current, visible: false }));
@@ -254,13 +256,24 @@ function App() {
   const opponent = me ? game.players.find((player) => player.id !== me.id) : null;
   const opponentHandCount = opponent ? game.state.hands?.[opponent.id]?.count || 0 : 0;
 
-  const handSpacingPx = useMemo(() => {
+  const handLayout = useMemo(() => {
     const count = myHandIds.length;
-    if (count <= 1) return 0;
     const cardWidth = 90;
-    const handMaxWidth = Math.max(cardWidth, tableWidth * 0.75);
-    const spacing = (handMaxWidth - cardWidth) / (count - 1);
-    return Math.max(-44, Math.min(26, spacing));
+    const tinyGap = 4;
+    const maxWidth = Math.max(cardWidth, tableWidth * 0.75);
+    if (count <= 1) {
+      return { cardWidth, spacing: 0, handWidth: cardWidth, startX: (tableWidth - cardWidth) / 2 };
+    }
+
+    const naturalWidth = count * cardWidth + (count - 1) * tinyGap;
+    const spacing =
+      naturalWidth <= maxWidth
+        ? cardWidth + tinyGap
+        : Math.max(24, Math.min(cardWidth + tinyGap, (maxWidth - cardWidth) / (count - 1)));
+    const handWidth = cardWidth + (count - 1) * spacing;
+    const startX = (tableWidth - handWidth) / 2;
+
+    return { cardWidth, spacing, handWidth, startX };
   }, [myHandIds.length, tableWidth]);
 
   function normalizeHandDropIndex(targetIndex, sourceIndex = draggedHandIndex) {
@@ -315,15 +328,31 @@ function App() {
   function getHandInsertIndex(clientX) {
     const handZone = handZoneRef.current;
     if (!handZone) return myHandIds.length;
-    const dropLines = [...handZone.querySelectorAll(".hand-drop-line")];
-    if (dropLines.length === 0) return myHandIds.length;
-
-    for (let idx = 0; idx < dropLines.length; idx += 1) {
-      const rect = dropLines[idx].getBoundingClientRect();
-      if (clientX < rect.left + rect.width / 2) return idx;
+    const rect = handZone.getBoundingClientRect();
+    const relativeX = clientX - rect.left - handLayout.startX;
+    if (myHandIds.length <= 1 || handLayout.spacing <= 0) {
+      return relativeX < handLayout.cardWidth / 2 ? 0 : myHandIds.length;
     }
-    return myHandIds.length;
+    return Math.max(0, Math.min(myHandIds.length, Math.round(relativeX / handLayout.spacing)));
   }
+
+  const handPreviewItems = useMemo(() => {
+    const items = myHandIds.map((cardId, idx) => ({ type: "card", cardId, originalIndex: idx }));
+    if (draggedHandIndex === null) return items;
+
+    const draggedItem = items[draggedHandIndex];
+    const remainingItems = items.filter((_, idx) => idx !== draggedHandIndex);
+    const previewIndex = handDropIndex === null ? null : normalizeHandDropIndex(handDropIndex);
+    if (previewIndex === null) return remainingItems;
+
+    const insertionIndex = Math.max(0, Math.min(remainingItems.length, previewIndex > draggedHandIndex ? previewIndex - 1 : previewIndex));
+    remainingItems.splice(insertionIndex, 0, {
+      type: "ghost",
+      cardId: draggedItem.cardId,
+      originalIndex: draggedHandIndex,
+    });
+    return remainingItems;
+  }, [myHandIds, draggedHandIndex, handDropIndex]);
 
   function onBoardDragOver(event) {
     if (draggedHandIndex === null) return;
@@ -444,15 +473,14 @@ function App() {
           const offset = stackOffsetPx(stack.cardIds.length, visibleCount);
           const cardsToRender = stack.cardIds.slice(stack.cardIds.length - visibleCount);
           const topCardOffset = Math.max(0, (visibleCount - 1) * offset);
+          const isStackHighlighted =
+            highlightedTargetId === stack.id || (boardDropPreview && boardDropPreview.targetStackId === stack.id);
 
           return React.createElement(
             "div",
             {
               key: stack.id,
-              className:
-                highlightedTargetId === stack.id || (boardDropPreview && boardDropPreview.targetStackId === stack.id)
-                  ? "stack stack-highlight"
-                  : "stack",
+              className: isStackHighlighted ? "stack stack-highlight" : "stack",
               style: {
                 left: `${viewedPosition.x}px`,
                 top: `${viewedPosition.y}px`,
@@ -466,7 +494,9 @@ function App() {
                 "div",
                 {
                   key: cardId,
-                  className: `card ${card.faceUp ? "faceup" : "facedown"}`,
+                  className: `card ${card.faceUp ? "faceup" : "facedown"} ${
+                    isStackHighlighted && index === cardsToRender.length - 1 ? "card-stack-highlight" : ""
+                  }`,
                   style: {
                     transform: `translate(${index * offset}px, ${index * offset}px)`,
                     zIndex: String(index),
@@ -485,7 +515,6 @@ function App() {
         {
           ref: handZoneRef,
           className: `player-hand-zone ${handRaised || draggedHandIndex !== null ? "raised" : ""}`,
-          style: { "--hand-spacing": `${handSpacingPx}px` },
           onDragOver: (event) => {
             if (draggedHandIndex === null) return;
             event.preventDefault();
@@ -500,38 +529,36 @@ function App() {
             setBoardDropPreview(null);
           },
         },
-        myHandIds.map((cardId, idx) => {
-          const card = game.state.cards[cardId];
+        handPreviewItems.map((item, idx) => {
+          const card = game.state.cards[item.cardId];
+          const left = handLayout.startX + idx * handLayout.spacing;
           return React.createElement(
-            React.Fragment,
-            { key: `${cardId}-${idx}` },
-            React.createElement("div", {
-              className: `hand-drop-line ${handDropIndex === idx && normalizeHandDropIndex(idx) !== null ? "active" : ""}`,
-            }),
-            React.createElement(
-              "div",
-              {
-                className: `card faceup card-hand ${draggedHandIndex === idx ? "hand-dragging" : ""}`,
-                draggable: true,
-                style: { zIndex: String(idx + 1) },
-                onClick: () => setHandModalCardId(cardId),
-                onDragStart: () => {
-                  setDraggedHandIndex(idx);
-                  setHandRaised(true);
-                  setHandDropIndex(null);
-                },
-                onDragEnd: () => {
-                  setDraggedHandIndex(null);
-                  setHandDropIndex(null);
-                  setBoardDropPreview(null);
-                },
-              },
-              cardLabel(card),
-            ),
+            "div",
+            {
+              key: `${item.type}-${item.cardId}-${idx}`,
+              className: `card faceup card-hand ${item.type === "ghost" ? "card-hand-ghost" : ""}`,
+              draggable: item.type === "card",
+              style: { left: `${left}px`, zIndex: String(idx + 1) },
+              onClick: item.type === "card" ? () => setHandModalCardId(item.cardId) : undefined,
+              onDragStart:
+                item.type === "card"
+                  ? () => {
+                      setDraggedHandIndex(item.originalIndex);
+                      setHandRaised(true);
+                      setHandDropIndex(null);
+                    }
+                  : undefined,
+              onDragEnd:
+                item.type === "card"
+                  ? () => {
+                      setDraggedHandIndex(null);
+                      setHandDropIndex(null);
+                      setBoardDropPreview(null);
+                    }
+                  : undefined,
+            },
+            cardLabel(card),
           );
-        }),
-        React.createElement("div", {
-          className: `hand-drop-line ${handDropIndex === myHandIds.length && normalizeHandDropIndex(myHandIds.length) !== null ? "active" : ""}`,
         }),
       ),
       boardDropPreview
@@ -584,6 +611,25 @@ function App() {
           ),
         )
       : null,
+    stackModalCardId
+      ? React.createElement(
+          "div",
+          { className: "overlay overlay-front", onClick: () => setStackModalCardId(null) },
+          React.createElement(
+            "dialog",
+            { open: true, onClick: (event) => event.stopPropagation() },
+            React.createElement("h3", null, "Card"),
+            React.createElement(
+              "div",
+              {
+                className: `card card-large ${game.state.cards[stackModalCardId]?.faceUp ? "faceup" : "facedown"}`,
+              },
+              game.state.cards[stackModalCardId]?.faceUp ? cardLabel(game.state.cards[stackModalCardId]) : "🂠",
+            ),
+            React.createElement("button", { onClick: () => setStackModalCardId(null) }, "Close"),
+          ),
+        )
+      : null,
     stackModalStackId
       ? React.createElement(
           "div",
@@ -606,7 +652,11 @@ function App() {
                   stackModalCards.map((card, idx) =>
                     React.createElement(
                       "div",
-                      { key: `${card.id}-${idx}`, className: "grid-tile" },
+                      {
+                        key: `${card.id}-${idx}`,
+                        className: "grid-tile",
+                        onClick: () => setStackModalCardId(card.id),
+                      },
                       React.createElement(
                         "div",
                         { className: `card card-grid ${card.faceUp ? "faceup" : "facedown"}` },
@@ -615,7 +665,7 @@ function App() {
                     ),
                   ),
                 ),
-            React.createElement("button", { onClick: () => setStackModalStackId(null) }, "Close"),
+            React.createElement("button", { onClick: () => { setStackModalCardId(null); setStackModalStackId(null); } }, "Close"),
           ),
         )
       : null,
