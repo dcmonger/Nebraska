@@ -202,6 +202,14 @@ button {
   position: absolute;
   cursor: grab;
   top: 8px;
+  touch-action: none;
+}
+
+.card-hand-dragging {
+  position: fixed;
+  pointer-events: none;
+  opacity: 0.9;
+  cursor: grabbing;
 }
 
 .card-hand-ghost {

@@ -43,11 +43,13 @@ function App() {
   const [handModalCardId, setHandModalCardId] = useState(null);
   const [stackModalCardId, setStackModalCardId] = useState(null);
   const [tableWidth, setTableWidth] = useState(typeof window === "undefined" ? 1200 : window.innerWidth);
+  const [handDragPreview, setHandDragPreview] = useState(null);
 
   const tableRef = useRef(null);
   const handZoneRef = useRef(null);
   const menuRef = useRef(null);
   const draggingRef = useRef(null);
+  const handDraggingRef = useRef(null);
   const gameRef = useRef(game);
   const meRef = useRef(me);
   const tokenRef = useRef(token);
@@ -104,6 +106,33 @@ function App() {
     }
 
     async function onPointerMove(event) {
+      const handDragging = handDraggingRef.current;
+      if (handDragging) {
+        if (!handDragging.moved && Math.hypot(event.clientX - handDragging.originX, event.clientY - handDragging.originY) > 4) {
+          handDragging.moved = true;
+          setDraggedHandIndex(handDragging.sourceIndex);
+          setHandRaised(true);
+        }
+
+        if (!handDragging.moved) return;
+
+        setHandDragPreview({
+          cardId: handDragging.cardId,
+          x: event.clientX - handDragging.offsetX,
+          y: event.clientY - handDragging.offsetY,
+        });
+
+        if (shouldTreatAsHandDrop(event.clientY)) {
+          setHandDropIndex(normalizeHandDropIndex(getHandInsertIndex(event.clientX), handDragging.sourceIndex));
+          setBoardDropPreview(null);
+          return;
+        }
+
+        setHandDropIndex(null);
+        setBoardDropPreview(getBoardDropPreview(event));
+        return;
+      }
+
       const dragging = draggingRef.current;
       const tableEl = tableRef.current;
       if (!dragging || !tableEl) return;
@@ -138,6 +167,35 @@ function App() {
     }
 
     async function onPointerUp(event) {
+      const handDragging = handDraggingRef.current;
+      if (handDragging) {
+        if (!handDragging.moved) {
+          setHandModalCardId(handDragging.cardId);
+        } else if (shouldTreatAsHandDrop(event.clientY)) {
+          await onHandDrop(getHandInsertIndex(event.clientX), handDragging.sourceIndex);
+        } else {
+          const preview = getBoardDropPreview(event);
+          if (preview) {
+            const world = viewToWorld(preview.x, preview.y, gameRef.current, meRef.current);
+            const result = await api("/api/play-from-hand", {
+              handIndex: handDragging.sourceIndex,
+              x: world.x,
+              y: world.y,
+              targetStackId: preview.targetStackId,
+            });
+            if (result.error) setLoginMessage(result.error);
+          }
+        }
+
+        handDraggingRef.current = null;
+        setDraggedHandIndex(null);
+        setHandDropIndex(null);
+        setBoardDropPreview(null);
+        setHandDragPreview(null);
+        setHandRaised(false);
+        return;
+      }
+
       const dragging = draggingRef.current;
       if (!dragging) return;
 
@@ -283,39 +341,22 @@ function App() {
     return targetIndex;
   }
 
-  async function onHandDrop(targetIndex) {
-    if (draggedHandIndex === null || targetIndex === null) return;
-    const validTargetIndex = normalizeHandDropIndex(targetIndex);
+  async function onHandDrop(targetIndex, sourceIndex = draggedHandIndex) {
+    if (sourceIndex === null || targetIndex === null) return;
+    const validTargetIndex = normalizeHandDropIndex(targetIndex, sourceIndex);
     if (validTargetIndex === null) {
       setDraggedHandIndex(null);
       setHandDropIndex(null);
       setHandRaised(false);
       return;
     }
-    const result = await api("/api/reorder-hand", { fromIndex: draggedHandIndex, toIndex: validTargetIndex });
+    const result = await api("/api/reorder-hand", { fromIndex: sourceIndex, toIndex: validTargetIndex });
     if (result.error) setLoginMessage(result.error);
     setDraggedHandIndex(null);
     setHandDropIndex(null);
     setHandRaised(false);
   }
 
-  useEffect(() => {
-    if (draggedHandIndex === null) return undefined;
-
-    function clearDragState() {
-      setDraggedHandIndex(null);
-      setHandDropIndex(null);
-      setBoardDropPreview(null);
-      setHandRaised(false);
-    }
-
-    window.addEventListener("dragend", clearDragState);
-    window.addEventListener("drop", clearDragState);
-    return () => {
-      window.removeEventListener("dragend", clearDragState);
-      window.removeEventListener("drop", clearDragState);
-    };
-  }, [draggedHandIndex]);
 
   function getBoardDropPreview(event) {
     if (!tableRef.current) return null;
@@ -374,50 +415,6 @@ function App() {
     return remainingItems;
   }, [myHandIds, draggedHandIndex, handDropIndex]);
 
-  function onBoardDragOver(event) {
-    if (draggedHandIndex === null) return;
-    event.preventDefault();
-    if (shouldTreatAsHandDrop(event.clientY)) {
-      setHandDropIndex(normalizeHandDropIndex(getHandInsertIndex(event.clientX)));
-      setBoardDropPreview(null);
-      return;
-    }
-    setHandDropIndex(null);
-    setBoardDropPreview(getBoardDropPreview(event));
-  }
-
-  async function onBoardDrop(event) {
-    if (draggedHandIndex === null) return;
-    event.preventDefault();
-    if (shouldTreatAsHandDrop(event.clientY)) {
-      await onHandDrop(getHandInsertIndex(event.clientX));
-      setBoardDropPreview(null);
-      return;
-    }
-    const preview = getBoardDropPreview(event);
-    if (!preview) {
-      setDraggedHandIndex(null);
-      setHandDropIndex(null);
-      setBoardDropPreview(null);
-      setHandRaised(false);
-      return;
-    }
-
-    const world = viewToWorld(preview.x, preview.y, gameRef.current, meRef.current);
-    const result = await api("/api/play-from-hand", {
-      handIndex: draggedHandIndex,
-      x: world.x,
-      y: world.y,
-      targetStackId: preview.targetStackId,
-    });
-    if (result.error) setLoginMessage(result.error);
-
-    setDraggedHandIndex(null);
-    setHandDropIndex(null);
-    setBoardDropPreview(null);
-    setHandRaised(false);
-  }
-
   return React.createElement(
     React.Fragment,
     null,
@@ -472,12 +469,6 @@ function App() {
       {
         ref: tableRef,
         className: perspectiveP2 ? "table perspective-p2" : "table",
-        onDragOver: onBoardDragOver,
-        onDrop: onBoardDrop,
-        onDragLeave: () => {
-          setBoardDropPreview(null);
-          setHandDropIndex(null);
-        },
         onPointerMove: (event) => {
           if (!tableRef.current) return;
           const rect = tableRef.current.getBoundingClientRect();
@@ -542,19 +533,6 @@ function App() {
         {
           ref: handZoneRef,
           className: `player-hand-zone ${handRaised || draggedHandIndex !== null ? "raised" : ""}`,
-          onDragOver: (event) => {
-            if (draggedHandIndex === null) return;
-            event.preventDefault();
-            setBoardDropPreview(null);
-            setHandDropIndex(normalizeHandDropIndex(getHandInsertIndex(event.clientX)));
-          },
-          onDrop: async (event) => {
-            if (draggedHandIndex === null) return;
-            event.preventDefault();
-            const targetIndex = handDropIndex ?? normalizeHandDropIndex(getHandInsertIndex(event.clientX));
-            await onHandDrop(targetIndex);
-            setBoardDropPreview(null);
-          },
         },
         handPreviewItems.map((item, idx) => {
           const card = game.state.cards[item.cardId];
@@ -564,23 +542,22 @@ function App() {
             {
               key: `${item.type}-${item.cardId}-${idx}`,
               className: `card faceup card-hand ${item.type === "ghost" ? "card-hand-ghost" : ""}`,
-              draggable: item.type === "card",
               style: { left: `${left}px`, zIndex: String(idx + 1) },
-              onClick: item.type === "card" ? () => setHandModalCardId(item.cardId) : undefined,
-              onDragStart:
+              onPointerDown:
                 item.type === "card"
                   ? (event) => {
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData("text/plain", item.cardId);
-                      setDraggedHandIndex(item.originalIndex);
-                      setHandRaised(true);
-                      setHandDropIndex(null);
-                    }
-                  : undefined,
-              onDragEnd:
-                item.type === "card"
-                  ? () => {
-                      setDraggedHandIndex(null);
+                      if (event.button !== 0) return;
+                      event.preventDefault();
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      handDraggingRef.current = {
+                        sourceIndex: item.originalIndex,
+                        cardId: item.cardId,
+                        originX: event.clientX,
+                        originY: event.clientY,
+                        offsetX: event.clientX - rect.left,
+                        offsetY: event.clientY - rect.top,
+                        moved: false,
+                      };
                       setHandDropIndex(null);
                       setBoardDropPreview(null);
                     }
@@ -595,6 +572,21 @@ function App() {
             className: "board-drop-outline",
             style: { left: `${boardDropPreview.x}px`, top: `${boardDropPreview.y}px` },
           })
+        : null,
+
+      handDragPreview
+        ? React.createElement(
+            "div",
+            {
+              className: "card faceup card-hand card-hand-dragging",
+              style: {
+                left: `${handDragPreview.x}px`,
+                top: `${handDragPreview.y}px`,
+                zIndex: "999",
+              },
+            },
+            cardLabel(game.state.cards[handDragPreview.cardId]),
+          )
         : null,
     ),
     menuState.visible
