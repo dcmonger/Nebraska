@@ -5,7 +5,6 @@ const TABLE_MIN_X = 20;
 const TABLE_MAX_X = 980;
 const TABLE_MIN_Y = 20;
 const TABLE_MAX_Y = 640;
-const STACK_CARD_OFFSET = 4;
 
 function cardLabel(card) {
   return `${card.rank}${card.suit}`;
@@ -20,16 +19,21 @@ function clampMenuPosition(clickX, clickY, menuEl) {
   return { x, y: Math.max(margin, y) };
 }
 
+function stackOffsetPx(cardCount) {
+  if (cardCount <= 1) return 0;
+  return Math.max(0.5, Math.min(4, 40 / cardCount));
+}
+
 function App() {
   const [token, setToken] = useState(null);
   const [me, setMe] = useState(null);
   const [nameInput, setNameInput] = useState("");
   const [loginMessage, setLoginMessage] = useState("");
-  const [game, setGame] = useState({ players: [], state: { cards: {}, stacks: {} } });
+  const [game, setGame] = useState({ players: [], state: { cards: {}, stacks: {}, hands: {} } });
   const [highlightedTargetId, setHighlightedTargetId] = useState(null);
   const [menuState, setMenuState] = useState({ visible: false, x: 0, y: 0, stackId: null });
-  const [cardModalCard, setCardModalCard] = useState(null);
   const [stackModalStackId, setStackModalStackId] = useState(null);
+  const [draggedHandIndex, setDraggedHandIndex] = useState(null);
 
   const tableRef = useRef(null);
   const menuRef = useRef(null);
@@ -63,12 +67,13 @@ function App() {
   }
 
   useEffect(() => {
-    const events = new EventSource("/events");
+    const query = token ? `?token=${encodeURIComponent(token)}` : "";
+    const events = new EventSource(`/events${query}`);
     events.onmessage = (event) => {
       setGame(JSON.parse(event.data));
     };
     return () => events.close();
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     function onPointerDown(event) {
@@ -181,17 +186,15 @@ function App() {
     const stack = game.state.stacks[stackId];
     if (!stack) return;
 
-    if (action === "flip-top") {
-      await api("/api/flip", { stackId });
-    } else if (action === "draw") {
-      const result = await api("/api/draw", { stackId });
+    if (action === "draw") {
+      const result = await api("/api/draw", { stackId, destination: "hand" });
       if (result.error) setLoginMessage(result.error);
-    } else if (action === "inspect-top") {
-      const topCardId = stack.cardIds[stack.cardIds.length - 1];
-      setCardModalCard(game.state.cards[topCardId]);
-    } else if (action === "flip-stack") {
+    } else if (action === "pull") {
+      const result = await api("/api/draw", { stackId, destination: "board" });
+      if (result.error) setLoginMessage(result.error);
+    } else if (action === "flip") {
       await api("/api/flip", { stackId, scope: "stack" });
-    } else if (action === "view-stack") {
+    } else if (action === "inspect") {
       setStackModalStackId(stackId);
     }
 
@@ -206,6 +209,16 @@ function App() {
   }, [stackModalStackId, game]);
 
   const perspectiveP2 = isPlayerTwoPerspective(game, me);
+  const myHandIds = me ? game.state.hands?.[me.id]?.cardIds || [] : [];
+  const opponent = me ? game.players.find((player) => player.id !== me.id) : null;
+  const opponentHandCount = opponent ? game.state.hands?.[opponent.id]?.count || 0 : 0;
+
+  async function onHandDrop(targetIndex) {
+    if (draggedHandIndex === null || draggedHandIndex === targetIndex) return;
+    const result = await api("/api/reorder-hand", { fromIndex: draggedHandIndex, toIndex: targetIndex });
+    if (result.error) setLoginMessage(result.error);
+    setDraggedHandIndex(null);
+  }
 
   return React.createElement(
     React.Fragment,
@@ -246,7 +259,7 @@ function App() {
       React.createElement(
         "div",
         { className: "panel" },
-        React.createElement("p", null, "Left click any stack to open actions."),
+        React.createElement("p", null, "Click stacks for actions (draw, pull, flip, inspect)."),
         React.createElement("p", null, "Drag and release on a highlighted stack to combine."),
       ),
     ),
@@ -256,12 +269,23 @@ function App() {
         ref: tableRef,
         className: perspectiveP2 ? "table perspective-p2" : "table",
       },
+      React.createElement(
+        "div",
+        { className: "opponent-hand-zone" },
+        Array.from({ length: opponentHandCount }).map((_, idx) =>
+          React.createElement("div", { key: `opp-${idx}`, className: "card facedown card-hand-opponent" }, "🂠"),
+        ),
+      ),
       Object.values(game.state.stacks)
         .filter((stack) => stack.cardIds.length > 0)
         .map((stack) => {
           const viewedPosition = worldToView(stack.x, stack.y, game, me);
           const allCardsFaceDown = stack.cardIds.every((cardId) => !game.state.cards[cardId].faceUp);
-          const visibleCount = allCardsFaceDown ? 1 : Math.min(stack.cardIds.length, 6);
+          const offset = stackOffsetPx(stack.cardIds.length);
+          const maxVisibleByHeight = Math.max(1, Math.floor(42 / Math.max(offset, 0.5)));
+          const visibleCount = allCardsFaceDown
+            ? Math.min(stack.cardIds.length, maxVisibleByHeight)
+            : Math.min(stack.cardIds.length, 10);
           const cardsToRender = stack.cardIds.slice(stack.cardIds.length - visibleCount);
 
           return React.createElement(
@@ -280,7 +304,7 @@ function App() {
                   key: cardId,
                   className: `card ${card.faceUp ? "faceup" : "facedown"}`,
                   style: {
-                    transform: `translate(${index * STACK_CARD_OFFSET}px, ${index * STACK_CARD_OFFSET}px)`,
+                    transform: `translate(${index * offset}px, ${index * offset}px)`,
                     zIndex: String(index),
                   },
                 },
@@ -292,6 +316,26 @@ function App() {
               : null,
           );
         }),
+      React.createElement(
+        "div",
+        { className: "player-hand-zone" },
+        myHandIds.map((cardId, idx) => {
+          const card = game.state.cards[cardId];
+          return React.createElement(
+            "div",
+            {
+              key: `${cardId}-${idx}`,
+              className: `card faceup card-hand ${draggedHandIndex === idx ? "hand-dragging" : ""}`,
+              draggable: true,
+              onDragStart: () => setDraggedHandIndex(idx),
+              onDragOver: (event) => event.preventDefault(),
+              onDrop: () => onHandDrop(idx),
+              onDragEnd: () => setDraggedHandIndex(null),
+            },
+            cardLabel(card),
+          );
+        }),
+      ),
     ),
     menuState.visible
       ? React.createElement(
@@ -301,41 +345,16 @@ function App() {
             className: "card-menu",
             style: { left: `${menuState.x}px`, top: `${menuState.y}px` },
           },
-          React.createElement("h3", null, `Stack (${(game.state.stacks[menuState.stackId]?.cardIds.length || 0)} cards)`),
+          React.createElement("h3", null, `Stack (${game.state.stacks[menuState.stackId]?.cardIds.length || 0} cards)`),
           React.createElement(
             "div",
             { className: "menu-buttons" },
-            React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("flip-top") }, "Flip top card"),
-            React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("draw") }, "Draw top card from stack"),
-            React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("inspect-top") }, "Inspect top card"),
-            React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("flip-stack") }, "Flip entire stack"),
-            game.state.stacks[menuState.stackId] &&
-            !game.state.stacks[menuState.stackId].cardIds.every((cardId) => !game.state.cards[cardId].faceUp)
-              ? React.createElement(
-                  "button",
-                  { className: "menu-btn", onClick: () => handleMenuAction("view-stack") },
-                  "View each card in stack",
-                )
+            React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("draw") }, "Draw"),
+            game.state.stacks[menuState.stackId] && game.state.stacks[menuState.stackId].cardIds.length > 1
+              ? React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("pull") }, "Pull")
               : null,
-          ),
-        )
-      : null,
-    cardModalCard
-      ? React.createElement(
-          "div",
-          { className: "overlay" },
-          React.createElement(
-            "dialog",
-            { open: true },
-            React.createElement("h3", null, "Card Inspector"),
-            React.createElement(
-              "div",
-              {
-                className: `card card-large ${cardModalCard.faceUp ? "faceup" : "facedown"}`,
-              },
-              cardModalCard.faceUp ? cardLabel(cardModalCard) : "🂠",
-            ),
-            React.createElement("button", { onClick: () => setCardModalCard(null) }, "Close"),
+            React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("flip") }, "Flip"),
+            React.createElement("button", { className: "menu-btn", onClick: () => handleMenuAction("inspect") }, "Inspect"),
           ),
         )
       : null,
@@ -347,22 +366,29 @@ function App() {
             "dialog",
             { open: true },
             React.createElement("h3", null, "Stack Inspector"),
-            React.createElement(
-              "div",
-              { className: "stack-grid" },
-              stackModalCards.map((card, idx) =>
-                React.createElement(
+            stackModalCards.length === 1
+              ? React.createElement(
                   "div",
-                  { key: `${card.id}-${idx}`, className: "grid-tile" },
-                  React.createElement(
-                    "div",
-                    { className: `card card-grid ${card.faceUp ? "faceup" : "facedown"}` },
-                    card.faceUp ? cardLabel(card) : "🂠",
+                  {
+                    className: `card card-large ${stackModalCards[0].faceUp ? "faceup" : "facedown"}`,
+                  },
+                  stackModalCards[0].faceUp ? cardLabel(stackModalCards[0]) : "🂠",
+                )
+              : React.createElement(
+                  "div",
+                  { className: "stack-grid" },
+                  stackModalCards.map((card, idx) =>
+                    React.createElement(
+                      "div",
+                      { key: `${card.id}-${idx}`, className: "grid-tile" },
+                      React.createElement(
+                        "div",
+                        { className: `card card-grid ${card.faceUp ? "faceup" : "facedown"}` },
+                        card.faceUp ? cardLabel(card) : "🂠",
+                      ),
+                    ),
                   ),
-                  React.createElement("span", null, card.faceUp ? `${cardLabel(card)} (up)` : "Face down card"),
                 ),
-              ),
-            ),
             React.createElement("button", { onClick: () => setStackModalStackId(null) }, "Close"),
           ),
         )
