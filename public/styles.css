@@ -103,8 +103,8 @@ button {
 .stack-highlight::after {
   content: "";
   position: absolute;
-  left: 0;
-  top: 0;
+  left: var(--stack-top-offset, 0);
+  top: var(--stack-top-offset, 0);
   width: 78px;
   height: 112px;
   border: 3px solid #ffd447;
@@ -188,6 +188,7 @@ button {
   width: 90px;
   height: 130px;
   font-size: 26px;
+  flex: 0 0 auto;
 }
 
 .card-hand {

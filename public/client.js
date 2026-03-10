@@ -21,9 +21,10 @@ function clampMenuPosition(clickX, clickY, menuEl) {
   return { x, y: Math.max(margin, y) };
 }
 
-function stackOffsetPx(cardCount) {
-  if (cardCount <= 1) return 0;
-  return Math.max(0.5, Math.min(4, 40 / cardCount));
+function stackOffsetPx(cardCount, visibleCount) {
+  if (cardCount <= 1 || visibleCount <= 1) return 0;
+  const maxThicknessPx = 27;
+  return Math.max(0.5, Math.min(4, maxThicknessPx / (visibleCount - 1)));
 }
 
 function App() {
@@ -140,7 +141,11 @@ function App() {
       if (!dragging) return;
 
       if (dragging.moved && shouldTreatAsHandDrop(event.clientY)) {
-        const result = await api("/api/pickup-to-hand", { stackId: dragging.stackId });
+        const targetIndex = normalizeHandDropIndex(getHandInsertIndex(event.clientX), null);
+        const result = await api("/api/pickup-to-hand", {
+          stackId: dragging.stackId,
+          toIndex: targetIndex === null ? undefined : targetIndex,
+        });
         if (result.error) setLoginMessage(result.error);
       } else if (dragging.moved && highlightedTargetId) {
         await api("/api/stack", {
@@ -310,9 +315,11 @@ function App() {
   function getHandInsertIndex(clientX) {
     const handZone = handZoneRef.current;
     if (!handZone) return myHandIds.length;
-    const cards = [...handZone.querySelectorAll(".card-hand")];
-    for (let idx = 0; idx < cards.length; idx += 1) {
-      const rect = cards[idx].getBoundingClientRect();
+    const dropLines = [...handZone.querySelectorAll(".hand-drop-line")];
+    if (dropLines.length === 0) return myHandIds.length;
+
+    for (let idx = 0; idx < dropLines.length; idx += 1) {
+      const rect = dropLines[idx].getBoundingClientRect();
       if (clientX < rect.left + rect.width / 2) return idx;
     }
     return myHandIds.length;
@@ -433,9 +440,10 @@ function App() {
         .filter((stack) => stack.cardIds.length > 0)
         .map((stack) => {
           const viewedPosition = worldToView(stack.x, stack.y, game, me);
-          const offset = stackOffsetPx(stack.cardIds.length);
-          const visibleCount = Math.min(stack.cardIds.length, 10);
+          const visibleCount = Math.min(stack.cardIds.length, 30);
+          const offset = stackOffsetPx(stack.cardIds.length, visibleCount);
           const cardsToRender = stack.cardIds.slice(stack.cardIds.length - visibleCount);
+          const topCardOffset = Math.max(0, (visibleCount - 1) * offset);
 
           return React.createElement(
             "div",
@@ -445,7 +453,11 @@ function App() {
                 highlightedTargetId === stack.id || (boardDropPreview && boardDropPreview.targetStackId === stack.id)
                   ? "stack stack-highlight"
                   : "stack",
-              style: { left: `${viewedPosition.x}px`, top: `${viewedPosition.y}px` },
+              style: {
+                left: `${viewedPosition.x}px`,
+                top: `${viewedPosition.y}px`,
+                "--stack-top-offset": `${topCardOffset}px`,
+              },
               onPointerDown: (event) => onStackPointerDown(event, stack.id, viewedPosition),
             },
             cardsToRender.map((cardId, index) => {
