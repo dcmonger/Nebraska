@@ -108,6 +108,15 @@ function App() {
           x: newX,
           y: newY,
         });
+
+        if (shouldTreatAsHandDrop(event.clientY)) {
+          setHandRaised(true);
+          setHandDropIndex(normalizeHandDropIndex(getHandInsertIndex(event.clientX)));
+          setHighlightedTargetId(null);
+          return;
+        }
+
+        setHandDropIndex(null);
         const targetId = getTargetStackId(dragging.stackId, newX, newY, gameRef.current);
         setHighlightedTargetId(targetId);
       }
@@ -117,7 +126,10 @@ function App() {
       const dragging = draggingRef.current;
       if (!dragging) return;
 
-      if (dragging.moved && highlightedTargetId) {
+      if (dragging.moved && shouldTreatAsHandDrop(event.clientY)) {
+        const result = await api("/api/pickup-to-hand", { stackId: dragging.stackId });
+        if (result.error) setLoginMessage(result.error);
+      } else if (dragging.moved && highlightedTargetId) {
         await api("/api/stack", {
           sourceStackId: dragging.stackId,
           targetStackId: highlightedTargetId,
@@ -136,6 +148,8 @@ function App() {
 
       draggingRef.current = null;
       setHighlightedTargetId(null);
+      setHandDropIndex(null);
+      setHandRaised(false);
     }
 
     window.addEventListener("pointerdown", onPointerDown);
@@ -222,9 +236,21 @@ function App() {
   const opponent = me ? game.players.find((player) => player.id !== me.id) : null;
   const opponentHandCount = opponent ? game.state.hands?.[opponent.id]?.count || 0 : 0;
 
+  function normalizeHandDropIndex(targetIndex, sourceIndex = draggedHandIndex) {
+    if (sourceIndex === null || targetIndex === null) return null;
+    if (targetIndex === sourceIndex || targetIndex === sourceIndex + 1) return null;
+    return targetIndex;
+  }
+
   async function onHandDrop(targetIndex) {
     if (draggedHandIndex === null || targetIndex === null) return;
-    const result = await api("/api/reorder-hand", { fromIndex: draggedHandIndex, toIndex: targetIndex });
+    const validTargetIndex = normalizeHandDropIndex(targetIndex);
+    if (validTargetIndex === null) {
+      setDraggedHandIndex(null);
+      setHandDropIndex(null);
+      return;
+    }
+    const result = await api("/api/reorder-hand", { fromIndex: draggedHandIndex, toIndex: validTargetIndex });
     if (result.error) setLoginMessage(result.error);
     setDraggedHandIndex(null);
     setHandDropIndex(null);
@@ -273,7 +299,7 @@ function App() {
     if (draggedHandIndex === null) return;
     event.preventDefault();
     if (shouldTreatAsHandDrop(event.clientY)) {
-      setHandDropIndex(getHandInsertIndex(event.clientX));
+      setHandDropIndex(normalizeHandDropIndex(getHandInsertIndex(event.clientX)));
       setBoardDropPreview(null);
       return;
     }
@@ -345,8 +371,14 @@ function App() {
       React.createElement(
         "div",
         { className: "panel" },
-        React.createElement("p", null, "Click stacks for actions (draw, pull, flip, inspect)."),
-        React.createElement("p", null, "Drag and release on a highlighted stack to combine."),
+        React.createElement("h2", null, "Log"),
+        React.createElement(
+          "ul",
+          { className: "log-list" },
+          (game.state.log || []).length === 0
+            ? React.createElement("li", { className: "log-empty" }, "No actions yet.")
+            : (game.state.log || []).slice().reverse().map((entry, idx) => React.createElement("li", { key: `${entry}-${idx}` }, entry)),
+        ),
       ),
     ),
     React.createElement(
@@ -422,7 +454,7 @@ function App() {
             if (draggedHandIndex === null) return;
             event.preventDefault();
             setBoardDropPreview(null);
-            setHandDropIndex(getHandInsertIndex(event.clientX));
+            setHandDropIndex(normalizeHandDropIndex(getHandInsertIndex(event.clientX)));
           },
           onDrop: async (event) => {
             if (draggedHandIndex === null) return;
@@ -437,10 +469,10 @@ function App() {
             React.Fragment,
             { key: `${cardId}-${idx}` },
             React.createElement("div", {
-              className: `hand-drop-line ${handDropIndex === idx ? "active" : ""}`,
+              className: `hand-drop-line ${handDropIndex === idx && normalizeHandDropIndex(idx) !== null ? "active" : ""}`,
               onDragOver: (event) => {
                 event.preventDefault();
-                setHandDropIndex(idx);
+                setHandDropIndex(normalizeHandDropIndex(idx));
               },
               onDrop: () => onHandDrop(idx),
             }),
@@ -465,10 +497,10 @@ function App() {
           );
         }),
         React.createElement("div", {
-          className: `hand-drop-line ${handDropIndex === myHandIds.length ? "active" : ""}`,
+          className: `hand-drop-line ${handDropIndex === myHandIds.length && normalizeHandDropIndex(myHandIds.length) !== null ? "active" : ""}`,
           onDragOver: (event) => {
             event.preventDefault();
-            setHandDropIndex(myHandIds.length);
+            setHandDropIndex(normalizeHandDropIndex(myHandIds.length));
           },
           onDrop: () => onHandDrop(myHandIds.length),
         }),

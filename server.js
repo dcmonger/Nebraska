@@ -45,8 +45,18 @@ function createInitialState() {
       },
     },
     hands: {},
+    log: [],
     nextStackId: 1,
   };
+}
+
+function addLog(playerId, action, details = "") {
+  const name = [...sessions.values()].find((player) => player.id === playerId)?.name || "Unknown";
+  const detailSuffix = details ? ` ${details}` : "";
+  state.log.push(`${name} ${action}${detailSuffix}`);
+  if (state.log.length > 80) {
+    state.log.shift();
+  }
 }
 
 function clampTable(value, min, max) {
@@ -123,6 +133,7 @@ function payloadForPlayer(playerId) {
       cards: state.cards,
       stacks: state.stacks,
       hands,
+      log: state.log,
     },
   };
 }
@@ -236,6 +247,7 @@ const server = http.createServer(async (req, res) => {
       const newStackId = drawTopCardToNewStack(sourceStack, player.id);
       if (!newStackId) return sendJson(res, 400, { error: "Unable to draw." });
       state.cards[state.stacks[newStackId].cardIds[0]].faceUp = true;
+      addLog(player.id, "pulled", `from ${sourceStack.id}`);
       broadcast();
       return sendJson(res, 200, { ok: true, stackId: newStackId });
     }
@@ -243,6 +255,25 @@ const server = http.createServer(async (req, res) => {
     const cardId = drawTopCardToHand(sourceStack, player.id);
     if (!cardId) return sendJson(res, 400, { error: "Unable to draw." });
     state.cards[cardId].faceUp = true;
+    addLog(player.id, "drew", `from ${sourceStack.id}`);
+    broadcast();
+    return sendJson(res, 200, { ok: true, cardId });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/pickup-to-hand") {
+    const player = getSession(req);
+    if (!player) return sendJson(res, 401, { error: "Login required." });
+
+    const body = await readBody(req).catch(() => null);
+    const sourceStack = state.stacks[body?.stackId];
+    if (!sourceStack || sourceStack.cardIds.length === 0) {
+      return sendJson(res, 400, { error: "No cards to draw from this stack." });
+    }
+
+    const cardId = drawTopCardToHand(sourceStack, player.id);
+    if (!cardId) return sendJson(res, 400, { error: "Unable to move card to hand." });
+    state.cards[cardId].faceUp = true;
+    addLog(player.id, "drew", `from ${sourceStack.id}`);
     broadcast();
     return sendJson(res, 200, { ok: true, cardId });
   }
@@ -260,6 +291,7 @@ const server = http.createServer(async (req, res) => {
     }
     const [moved] = hand.splice(fromIndex, 1);
     const adjustedToIndex = toIndex > fromIndex ? toIndex - 1 : toIndex;
+    if (adjustedToIndex === fromIndex) return sendJson(res, 200, { ok: true });
     hand.splice(adjustedToIndex, 0, moved);
     broadcast();
     return sendJson(res, 200, { ok: true });
@@ -280,6 +312,7 @@ const server = http.createServer(async (req, res) => {
     if (!played) return sendJson(res, 400, { error: "Unable to play card from hand." });
 
     state.cards[played.cardId].faceUp = true;
+    addLog(player.id, "pulled", "to board");
     broadcast();
     return sendJson(res, 200, { ok: true, ...played });
   }
@@ -299,6 +332,7 @@ const server = http.createServer(async (req, res) => {
         const card = state.cards[cardId];
         card.faceUp = !card.faceUp;
       }
+      addLog(player.id, "flipped", `stack ${stack.id}`);
       broadcast();
       return sendJson(res, 200, { ok: true });
     }
@@ -311,6 +345,7 @@ const server = http.createServer(async (req, res) => {
     } else {
       card.faceUp = !card.faceUp;
     }
+    addLog(player.id, "flipped", `top of ${stack.id}`);
     broadcast();
     return sendJson(res, 200, { ok: true });
   }
@@ -329,6 +364,7 @@ const server = http.createServer(async (req, res) => {
       [stack.cardIds[i], stack.cardIds[j]] = [stack.cardIds[j], stack.cardIds[i]];
     }
 
+    addLog(player.id, "shuffled", `stack ${stack.id}`);
     broadcast();
     return sendJson(res, 200, { ok: true });
   }
@@ -355,6 +391,7 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req).catch(() => null);
     const merged = mergeStacks(body?.sourceStackId, body?.targetStackId, player.id);
     if (!merged) return sendJson(res, 400, { error: "Unable to stack." });
+    addLog(player.id, "stacked", `${body?.sourceStackId} onto ${body?.targetStackId}`);
     broadcast();
     return sendJson(res, 200, { ok: true });
   }
